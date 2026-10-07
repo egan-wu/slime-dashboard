@@ -284,7 +284,20 @@ const SLEEP_EYES = [1, 4]
 // The awake face's two eye characters, left then right, and the vein's color.
 const FACE_EYES = { x: ['x', 'x'], '><': ['>', '<'], TT: ['T', 'T'] } as const
 const VEIN = 0xff6b6b
-const ASK = 0xfff3a0
+// Waiting on the person: a speech bubble over the main slime holding a
+// question mark, its tail pointing down at the slime's head. It fills the
+// sky above the slime and flashes between yellow and white.
+const BUBBLE = [
+  '.BBBBB.',
+  'BBQQQBB',
+  'BBBBQBB',
+  'BBBQQBB',
+  'BBBBBBB',
+  'BBBQBBB',
+  '.BBBBB.',
+  '...BB..',
+]
+export const ASK = { yellow: 0xffd23f, white: 0xffffff, mark: 0x101018 }
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -503,7 +516,8 @@ export function frame(
     // The main slime crawls along the ground and only leaves it to clear a rock.
     const width = SLIME.awake[0]!.length
     const left = cx - (width >> 1)
-    const lift = rockLift(left, width, rocks)
+    // Halted, nothing passes beneath it: it stays on the ground.
+    const lift = halted ? 0 : rockLift(left, width, rocks)
     const rows = halted
       ? SLIME.awake
       : lift > 0
@@ -527,10 +541,11 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
-    // A question mark in a ring over its head, blinking: on two beats, off one.
-    if (face.ask && Math.floor(tick / 4) % 3 !== 2) {
-      const row = Math.max(0, (top >> 1) - 1)
-      ;['(', '?', ')'].forEach((ch, i) => overlays.push({ col: cx - 1 + i, row, ch, fg: ASK }))
+    // The bubble's tail rests on the head (the bubble takes the whole sky
+    // above it, rows 0 to 7); it flashes every four ticks.
+    if (face.ask) {
+      const fill = Math.floor(tick / 4) % 2 === 0 ? ASK.yellow : ASK.white
+      draw({ rows: BUBBLE, colors: { B: fill, Q: ASK.mark } }, cx - (BUBBLE[0]!.length >> 1), top - 1)
     }
   } else {
     const rows = SLIME.sleep

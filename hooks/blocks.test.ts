@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
-import { frame, ROWS } from './scene'
+import { ASK, frame, ROWS } from './scene'
 
 const PLUGIN = 'slime-subagent-dashboard'
 const PANE = {
@@ -30,14 +30,23 @@ test('cache hit rate and accumulated tokens add up over turns', async () => {
   expect(secondsText(12_440)).toBe('12.4s')
 })
 
-test('waiting on the person: a blinking (?) over the main slime', async () => {
-  const draw = (tick: number) => {
-    const cells = frame(30, { cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 }, tick, true, 'claude-opus-5-5', [], { day: true, sky: 'cloudy' }, undefined, { ask: true })
+test('waiting on the person: a flashing speech bubble with a question mark over the main slime', async () => {
+  // Every pixel color the scene drew, top and bottom half of each cell.
+  const colors = (tick: number, ask: boolean) => {
+    const cells = frame(30, { cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 }, tick, true, 'claude-opus-5-5', [], { day: false, sky: 'cloudy' }, undefined, { ask })
     const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
-    return Array.from({ length: 30 * ROWS }, (_, i) => String.fromCharCode(words[i * 3]!)).join('')
+    const seen: number[] = []
+    for (let i = 0; i < 30 * ROWS; i++) seen.push(words[i * 3 + 1]!, words[i * 3 + 2]!)
+    return seen
   }
-  expect(draw(0)).toContain('(?)')
-  expect(draw(8)).not.toContain('(?)')
+  const count = (seen: number[], color: number) => seen.filter(c => c === color).length
+  // A big bubble: dozens of yellow pixels, the dark question mark inside it.
+  expect(count(colors(0, true), ASK.yellow)).toBeGreaterThan(30)
+  expect(count(colors(0, true), ASK.mark)).toBeGreaterThan(count(colors(0, false), ASK.mark))
+  // Four ticks later it flashes white, and without a question it is not there.
+  expect(count(colors(4, true), ASK.yellow)).toBe(0)
+  expect(count(colors(4, true), ASK.white)).toBeGreaterThan(30)
+  expect(count(colors(0, false), ASK.yellow)).toBe(0)
 })
 
 test('the Skill Box sends a skill with the typed prompt, the Property block opens', async ($, on) => {
