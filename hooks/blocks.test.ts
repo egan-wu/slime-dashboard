@@ -113,6 +113,7 @@ test('Property lists Model and Effort first; Effort opens a row of levels to pic
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
     const at = (pattern: RegExp) => texts.findIndex(t => pattern.test(t ?? ''))
     expect(at(/Model: /)).toBeLessThan(at(/Effort: /))
+    expect(await ui.find({ type: 'Text', text: /^\[.+\]$/ })).toBeDefined()
     expect(at(/Effort: /)).toBeLessThan(at(/Cache Hit Rate/))
 
     expect(await ui.find({ key: 'effort-high' })).toBeUndefined()

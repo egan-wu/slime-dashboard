@@ -596,7 +596,7 @@ export const register: Register = on => {
           <Box flexDirection="column">
             <Text>
               {' Model: '}
-              <Text color={hex(info.body)}>{info.name}</Text>
+              <Text color={hex(info.body)}>{`[${info.name}]`}</Text>
             </Text>
             <Box flexDirection="row">
               <Text>{' Effort: '}</Text>
