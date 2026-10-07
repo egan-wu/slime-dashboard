@@ -284,6 +284,7 @@ const SLEEP_EYES = [1, 4]
 // The awake face's two eye characters, left then right, and the vein's color.
 const FACE_EYES = { x: ['x', 'x'], '><': ['>', '<'], TT: ['T', 'T'] } as const
 const VEIN = 0xff6b6b
+const ASK = 0xfff3a0
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -339,9 +340,11 @@ export function frame(
   // The main slime keeps to the right so its followers have room behind it.
   const cx = fete?.cx ?? Math.max(6, w - 8)
   // During the find the troop is wide awake whatever the session is doing.
-  // Down, it stands still and wide awake: nothing passes until a limit resets.
-  const awake = busy || fete !== undefined || face.down === true
-  const travelling = fete ? fete.scrolling : busy && !face.down
+  // Down, or waiting on the person, it stands still and wide awake: nothing
+  // passes until a limit resets or they answer. The little slimes keep hopping.
+  const halted = face.down === true || face.ask === true
+  const awake = busy || fete !== undefined || halted
+  const travelling = fete ? fete.scrolling : busy && !halted
   const px = new Uint32Array(w * PX_H).fill(SKY)
   const put = (x: number, y: number, color: number) => {
     if (x >= 0 && x < w && y >= 0 && y < PX_H) px[y * w + x] = color
@@ -501,7 +504,7 @@ export function frame(
     const width = SLIME.awake[0]!.length
     const left = cx - (width >> 1)
     const lift = rockLift(left, width, rocks)
-    const rows = face.down
+    const rows = halted
       ? SLIME.awake
       : lift > 0
         ? SLIME.air
@@ -524,6 +527,11 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
+    // A question mark in a ring over its head, blinking: on two beats, off one.
+    if (face.ask && Math.floor(tick / 4) % 3 !== 2) {
+      const row = Math.max(0, (top >> 1) - 1)
+      ;['(', '?', ')'].forEach((ch, i) => overlays.push({ col: cx - 1 + i, row, ch, fg: ASK }))
+    }
   } else {
     const rows = SLIME.sleep
     const left = cx - (rows[0]!.length >> 1)

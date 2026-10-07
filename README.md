@@ -4,13 +4,16 @@ A Claude Code side pane in the spirit of the offline dino game, starring a slime
 
 | Idle | Busy, with three subagents |
 | --- | --- |
-| <img src="docs/idle.png" width="320" alt="Idle: the slime sleeps at night under the stars, no subagents running, context window 18%"> | <img src="docs/busy.png" width="320" alt="Busy: the red Opus slime leaps a rock with yellow Haiku and blue Sonnet slimes behind, three subagents listed, context window 42%"> |
+| <img src="docs/idle.png" width="320" alt="Idle on an API key: full HP, CP 18%, the slime asleep at night, Property and Skill Box closed, no subagents"> | <img src="docs/busy.png" width="320" alt="Busy on a subscription: HP 23%, MP 70%, CP 62% so the slime squints, three subagent slimes behind it, Property and Skill Box open"> |
 
 - **Busy / idle**: while Claude works, the slime travels and clouds, birds, trees and rocks scroll past at their own speeds. Once the turn ends it falls asleep: clouds and birds keep drifting, while trees and rocks stand still.
 - **Model colors**: the slime is purple on Fable, red on Opus, blue on Sonnet and yellow on Haiku.
 - **Subagents**: each subagent buds off a little slime in its model's color. When the work is done the troop finds a treasure chest.
 - **Sub-agent Monitor**: lists the running subagents, each with its model and its task.
-- **Context Window**: shows how full the context window is as a 10-cell bar, white to dark.
+- **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, with an **Unload** button that runs `/compact`. Out of HP or MP the slime stops with `x` eyes until a limit resets. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
+- **Waiting on you**: when a permission prompt or a question is waiting for an answer, the troop stops and a blinking `(?)` shows over the main slime.
+- **Property**: opens to show the session's cache hit rate, the tokens it has used, the current turn's iterations, and how long the latest turn took.
+- **Skill Box**: opens to a prompt field over the skills you have registered, five rows at a time. Pressing `[skill]` runs `/skill "prompt"`, or `/skill` alone with the field empty.
 - **Model buttons**: switch the session's model from the pane.
 - **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) once an hour (wttr.in places you by your IP address).
 
@@ -23,6 +26,14 @@ At a Claude Code prompt in a terminal:
 ```
 
 Answer `y` to add the marketplace, then pick a scope. The pane opens by itself when the terminal is 144 columns wide or more. In a narrower terminal, or after closing it, type `/slime-subagent-dashboard` to open it.
+
+Register skills for the Skill Box with the same command:
+
+```
+/slime-subagent-dashboard add run-unit-test
+/slime-subagent-dashboard remove run-unit-test
+/slime-subagent-dashboard list
+```
 
 It docks on the right only in Claude Code's fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`, 110 columns or more). Otherwise it sits above the prompt.
 

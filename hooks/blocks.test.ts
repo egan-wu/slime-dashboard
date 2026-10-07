@@ -1,0 +1,72 @@
+import { expect, mock, test } from 'claude-code/testing'
+
+import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
+import { frame, ROWS } from './scene'
+
+const PLUGIN = 'slime-subagent-dashboard'
+const PANE = {
+  plugin: PLUGIN,
+  component: 'Pane' as const,
+  requestId: PLUGIN,
+  props: {
+    title: 'Slime',
+    isFocused: true,
+    bodyColumns: 33,
+    placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows: 40 },
+    view: {},
+  },
+}
+
+test('cache hit rate and accumulated tokens add up over turns', async () => {
+  const one = { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 200, cache_read_input_tokens: 700 }
+  const t = addUsage(addUsage(NO_TALLY, one), one)
+  expect(cacheHitRate(t)).toBe(70)
+  expect(totalTokens(t)).toBe(2100)
+  expect(cacheHitRate(NO_TALLY)).toBeUndefined()
+  expect(compact(950)).toBe('950')
+  expect(compact(12_345)).toBe('12.3k')
+  expect(compact(4_560_000)).toBe('4.56M')
+  expect(secondsText(12_440)).toBe('12.4s')
+})
+
+test('waiting on the person: a blinking (?) over the main slime', async () => {
+  const draw = (tick: number) => {
+    const cells = frame(30, { cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 }, tick, true, 'claude-opus-5-5', [], { day: true, sky: 'cloudy' }, undefined, { ask: true })
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    return Array.from({ length: 30 * ROWS }, (_, i) => String.fromCharCode(words[i * 3]!)).join('')
+  }
+  expect(draw(0)).toContain('(?)')
+  expect(draw(8)).not.toContain('(?)')
+})
+
+test('the Skill Box sends a skill with the typed prompt, the Property block opens', async ($, on) => {
+  mock.store(on)
+  const ran: string[] = []
+  on('command.run', { command: 'run-unit-test' }, async (_$, e) => {
+    ran.push(e.args)
+    return { text: '' }
+  })
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  expect((await manage('add run-unit-test')).text).toContain('added /run-unit-test')
+  expect((await manage('add /lint')).text).toContain('added /lint (2 registered)')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    ran.length = 0
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ key: 'skill-run-unit-test' })).toBeUndefined()
+    await ui.press({ key: 'skills-toggle' })
+    expect((await ui.find({ key: 'skill-run-unit-test' }))?.text).toBe('[run-unit-test]')
+    await ui.input({ key: 'skill-prompt', text: 'only the vitals tests', kind: 'change' })
+    await ui.press({ key: 'skill-run-unit-test' })
+    expect(ran).toEqual(['"only the vitals tests"'])
+
+    await ui.press({ key: 'props-toggle' })
+    expect(await ui.find({ type: 'Text', text: /Cache Hit Rate/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Iteration Rate: 0\/∞/ })).toBeDefined()
+    await ui.press({ key: 'props-toggle' })
+    await ui.press({ key: 'skills-toggle' })
+    await ui.unmount()
+  }
+})

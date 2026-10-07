@@ -37,7 +37,9 @@ export function vitalsOf(rateLimits: readonly Window[], contextPercent: number |
 export const isDown = (v: Vitals) => v.hp <= 0 || (v.plan === 'subscription' && v.mp <= 0)
 
 export type Eyes = 'x' | '><' | 'TT'
-export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean }
+// `ask`: the session waits on the person (a permission prompt, a question),
+// so the troop holds still with a blinking question mark over the main slime.
+export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean }
 
 // Down: it stops with crossed-out eyes. Walking with a full head: squinting
 // from 50%, a vein beside its head from 70%, in tears from 90%.

@@ -3,6 +3,8 @@ import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
 import { EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
 import type { Offsets } from './scene'
+import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
+import type { Tally } from './props'
 import { cleanSummary, wrapSummary } from './summary'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
@@ -32,6 +34,30 @@ const minionsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'minions' } 
 const weatherAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'weather' } as const, DEFAULT_WEATHER as SlimeWeather)
 // HP, MP and CP: what is left of the usage limits, and the context window's fill.
 const vitalsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'vitals' } as const, FULL as Vitals)
+// True while the session waits on the person: a permission prompt or a question.
+const waitingAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'waiting' } as const, false)
+// The Skill Box: the skills registered with /slime-subagent-dashboard add (kept
+// in the store across sessions), whether it is open, the prompt typed for
+// them, and the first of the five rows shown.
+const skillsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skills' } as const, [] as string[])
+const skillsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillsOpen' } as const, false)
+const skillPromptAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillPrompt' } as const, '')
+const skillTopAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillTop' } as const, 0)
+// The Property block: open or not, and the session's figures it shows.
+const propsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'propsOpen' } as const, false)
+const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
+// The model requests of the main loop's current (or last) turn.
+const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
+// The last turn's length, and when the running one started (0: none runs).
+const lastTurnMsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'lastTurnMs' } as const, 0)
+const turnStartedAtAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'turnStartedAt' } as const, 0)
+
+const SKILL_ROWS = 5
+const SKILLS_KEY = 'skills'
+// Tools whose call itself waits on the person.
+const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+// Notifications that mean the person is asked: a permission dialog, an MCP elicitation.
+const ASKING_NOTICES = new Set(['permission_prompt', 'elicitation_dialog'])
 
 // Animation lives in the module: a reload restarts the walk, the state stays.
 let busy = false
@@ -41,6 +67,7 @@ let columns = 0
 let minions: SlimeMinion[] = []
 let weather: SlimeWeather = DEFAULT_WEATHER
 let vitals: Vitals = FULL
+let waiting = false
 // The tick the troop found its treasure chest on, while that scene plays.
 let partyAt: number | undefined
 // When each new little slime starts budding off the main one. They come out
@@ -177,6 +204,48 @@ async function refreshVitals($: EngineInterface) {
 // The bars' colors: HP red, MP blue, CP white.
 const BAR = { hp: '#e5383b', mp: '#3a86ff', cp: '#f0f0f0' }
 
+async function setWaiting($: EngineInterface, value: boolean) {
+  if (value === waiting) return
+  waiting = value
+  await update($, waitingAtom, () => value)
+}
+
+async function setSkills($: EngineInterface, fn: (list: string[]) => string[]) {
+  const list = fn(await read($, skillsAtom))
+  await update($, skillsAtom, () => list)
+  await $.store.set(SKILLS_KEY, list)
+  return list
+}
+
+// A skill's button: run it as the person would type it, with the Skill Box's
+// prompt after it in quotes when one is typed; the field then clears.
+async function runSkill($: EngineInterface, name: string) {
+  const prompt = (await read($, skillPromptAtom)).trim()
+  const args = prompt === '' ? '' : `"${prompt.replace(/"/g, '\\"')}"`
+  await update($, skillPromptAtom, () => '')
+  await $.command.run({ command: name, args })
+}
+
+// `add <skill>`, `remove <skill>`, `list`, or nothing to open the pane.
+async function manageSkills($: EngineInterface, args: string): Promise<string | undefined> {
+  const [verb, ...rest] = args.trim().split(/\s+/)
+  const name = rest.join(' ').replace(/^\//, '')
+  if (verb === 'add' && name) {
+    const list = await setSkills($, l => (l.includes(name) ? l : [...l, name]))
+    return `Skill Box: added /${name} (${list.length} registered).`
+  }
+  if (verb === 'remove' && name) {
+    const list = await setSkills($, l => l.filter(s => s !== name))
+    return `Skill Box: removed /${name} (${list.length} registered).`
+  }
+  if (verb === 'list') {
+    const list = await read($, skillsAtom)
+    return list.length === 0 ? 'Skill Box: no skills registered.' : `Skill Box: ${list.map(s => `/${s}`).join(' ')}`
+  }
+  if (verb) return 'Usage: /slime-subagent-dashboard [add <skill> | remove <skill> | list]'
+  return undefined
+}
+
 async function pickModel($: EngineInterface, id: string) {
   await $.command.run({ command: 'model', args: id })
   await refreshModel($)
@@ -184,7 +253,14 @@ async function pickModel($: EngineInterface, id: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'slime-subagent-dashboard', description: 'Open the slime subagent dashboard pane' })
+    await $.command.register({
+      name: 'slime-subagent-dashboard',
+      description: 'Open the slime subagent dashboard pane, or manage its Skill Box',
+      argumentHint: '[add <skill> | remove <skill> | list]',
+    })
+    const kept = await $.store.get(SKILLS_KEY)
+    if (Array.isArray(kept)) await update($, skillsAtom, () => kept.filter((s): s is string => typeof s === 'string'))
+    waiting = await read($, waitingAtom)
     busy = await read($, busyAtom)
     // Slimes that were dropping out when the module reloaded are simply gone.
     minions = (await read($, minionsAtom)).filter(m => !m.done)
@@ -203,8 +279,8 @@ export const register: Register = on => {
       const inLine = minions.filter(m => !m.done || m.id === stayer).length
       if (party !== undefined && party >= partyLength(columns || OPEN.columns, inLine)) await endParty($)
       const t = partyTick()
-      // Down, the troop holds still until a limit resets.
-      const going = moving(busy, minions) && !isDown(vitals)
+      // Down, or waiting on the person, the troop holds still.
+      const going = moving(busy, minions) && !isDown(vitals) && !waiting
       step(off, t === undefined ? going : partyScrolling(columns || OPEN.columns, t, inLine))
       closeRanks()
       await dropGone($)
@@ -215,15 +291,20 @@ export const register: Register = on => {
       if (tick % 10 === 5) await checkMinions($)
       if (columns > 0) {
         const walking = moving(busy, minions)
-        const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, faceOf(vitals, walking))
+        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting }
+        const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, face)
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
+      // The latest-command timer counts while a turn runs.
+      if (busy && tick % 5 === 0) $.ui.invalidate('ui.render')
     })
 
     return next(e)
   })
 
-  on('command.run', { command: 'slime-subagent-dashboard' }, async $ => {
+  on('command.run', { command: 'slime-subagent-dashboard' }, async ($, e) => {
+    const said = await manageSkills($, e.args)
+    if (said !== undefined) return { text: said }
     await $.ui.open(OPEN)
 
     return { text: 'Slime subagent dashboard opened.' }
@@ -231,6 +312,10 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     await setBusy($, true)
+    await setWaiting($, false)
+    await update($, iterationAtom, () => 0)
+    const now = await $.clock.now()
+    await update($, turnStartedAtAtom, () => now)
     await refreshModel($)
 
     return next(e)
@@ -250,9 +335,41 @@ export const register: Register = on => {
     return result
   })
 
+  // Each model request of the main loop's turn is one iteration; a new one
+  // also means the person has answered whatever was asked.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      await update($, iterationAtom, () => e.index + 1).catch(() => {})
+      await setWaiting($, false).catch(() => {})
+    }
+
+    return yield* next(e)
+  })
+
+  // A question put to the person, or a plan to approve: waiting until answered.
+  on('tool.call', async ($, e, next) => {
+    const asks = ASKING_TOOLS.has(String(e.tool))
+    if (asks) await setWaiting($, true).catch(() => {})
+    const ran = await next(e)
+    // A permission prompt was answered once its call has run (or been refused).
+    await setWaiting($, false).catch(() => {})
+
+    return ran
+  })
+
+  on('classic.Notification', async ($, e, next) => {
+    if (ASKING_NOTICES.has(e.notification_type)) await setWaiting($, true).catch(() => {})
+
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
+    if (e.usage) await update($, tallyAtom, t => addUsage(t, e.usage!)).catch(() => {})
     if (e.agentId === undefined) {
       await setBusy($, false)
+      await setWaiting($, false)
+      await update($, lastTurnMsAtom, () => e.durationMs)
+      await update($, turnStartedAtAtom, () => 0)
       await refreshVitals($)
     }
 
@@ -272,10 +389,14 @@ export const register: Register = on => {
     const sky = await read($, weatherAtom)
     const isBusy = moving(await read($, busyAtom), followers)
     const v = await read($, vitalsAtom)
+    const isWaiting = await read($, waitingAtom)
     const info = modelInfo(current)
     const status = isBusy ? '▸' : 'z'
 
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const table = $.ui.resolve(e)
+    const { Box, Button, Text } = table
+    // Every surface but mobile has a text field.
+    const Input = 'Input' in table ? table.Input : undefined
     const picker = (
       <Box flexDirection="row" gap={1}>
         {PICKS.map(pick => (
@@ -356,6 +477,80 @@ export const register: Register = on => {
       </Box>
     )
 
+    const rule = <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
+    // A block's title and the button that opens or closes it.
+    const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
+      <Box flexDirection="row">
+        <Text dimColor>{`${title} `}</Text>
+        <Button key={key} label={isOpen ? '▲' : '▼'} onPress={toggle} />
+      </Box>
+    )
+
+    // Property: the session's figures, shown once opened.
+    const propsOpen = await read($, propsOpenAtom)
+    const tally = await read($, tallyAtom)
+    const iteration = await read($, iterationAtom)
+    const startedAt = await read($, turnStartedAtAtom)
+    const lastMs = await read($, lastTurnMsAtom)
+    const hit = cacheHitRate(tally)
+    const timerMs = startedAt > 0 ? (await $.clock.now()) - startedAt : lastMs
+    const property = (
+      <Box flexDirection="column">
+        {rule}
+        {header('Property', 'props-toggle', propsOpen, () => update($, propsOpenAtom, o => !o))}
+        {propsOpen && (
+          <Box flexDirection="column">
+            <Text>{` Cache Hit Rate: ${hit === undefined ? '—' : `${hit.toFixed(1)}%`}`}</Text>
+            <Text>{` Token Usage: ${compact(totalTokens(tally))}`}</Text>
+            <Text>{` Iteration Rate: ${iteration}/∞`}</Text>
+            <Text>{` Latest Command: ${secondsText(timerMs)}`}</Text>
+          </Box>
+        )}
+      </Box>
+    )
+
+    // Skill Box: a prompt field over the registered skills, five rows at a
+    // time; each skill's button runs it with the prompt.
+    const skills = await read($, skillsAtom)
+    const skillsOpen = await read($, skillsOpenAtom)
+    const skillPrompt = await read($, skillPromptAtom)
+    const top = Math.max(0, Math.min(await read($, skillTopAtom), Math.max(0, skills.length - SKILL_ROWS)))
+    const scroll = (by: number) =>
+      update($, skillTopAtom, n => Math.max(0, Math.min(n + by, Math.max(0, skills.length - SKILL_ROWS))))
+    const skillBox = (
+      <Box flexDirection="column">
+        {rule}
+        {header('Skill Box', 'skills-toggle', skillsOpen, () => update($, skillsOpenAtom, o => !o))}
+        {skillsOpen && (
+          <Box flexDirection="column">
+            {Input && (
+              <Input
+                key="skill-prompt"
+                placeholder="prompt for the skill…"
+                value={skillPrompt}
+                onInput={(value: string) => update($, skillPromptAtom, () => value)}
+                onSubmit={(value: string) => update($, skillPromptAtom, () => value)}
+              />
+            )}
+            {skills.length === 0 ? (
+              <Text dimColor>{' - none: /slime-subagent-dashboard\n   add <skill>'}</Text>
+            ) : (
+              skills.slice(top, top + SKILL_ROWS).map(name => (
+                <Button key={`skill-${name}`} label={`[${name}]`} plain onPress={() => runSkill($, name)} />
+              ))
+            )}
+            {skills.length > SKILL_ROWS && (
+              <Box flexDirection="row" gap={1}>
+                <Button key="skills-up" label="▲" plain onPress={() => scroll(-1)} />
+                <Button key="skills-down" label="▼" plain onPress={() => scroll(1)} />
+                <Text dimColor>{`${top + 1}-${Math.min(top + SKILL_ROWS, skills.length)}/${skills.length}`}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+      </Box>
+    )
+
     // Only surfaces without the scene need the model and status spelled out.
     const line = (
       <Text>
@@ -371,8 +566,10 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {stats}
-          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), faceOf(v, isBusy))} />
+          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting })} />
           {picker}
+          {property}
+          {skillBox}
           {monitor}
         </Box>
       )
@@ -383,6 +580,8 @@ export const register: Register = on => {
         {stats}
         {line}
         {picker}
+        {property}
+        {skillBox}
         {monitor}
       </Box>
     )
