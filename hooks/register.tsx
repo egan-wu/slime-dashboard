@@ -10,6 +10,7 @@ import type { Tally } from './props'
 import { grouped, parseAdd, skillsFrom } from './skills'
 import type { Skill } from './skills'
 import { cleanSummary, wrapSummary } from './summary'
+import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
 import { VERSION } from './version'
@@ -22,6 +23,8 @@ const TICK_MS = 100
 // The sky is read every quarter hour, so day turns to night close to sunset;
 // a read that fails is tried again two minutes later.
 const WEATHER_MS = 15 * 60 * 1000
+// How often to ask GitHub whether a newer dashboard is out.
+const FRESHNESS_MS = 30 * 60 * 1000
 const WEATHER_RETRY_MS = 2 * 60 * 1000
 // Docked beside the fullscreen transcript, the sidebar asks for this width.
 const OPEN = { id: PANE, title: 'Slime', columns: 33 }
@@ -59,6 +62,8 @@ const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as co
 // The Setting block: open or not, and what the last Update said ('' before one).
 const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' } as const, false)
 const updateStatusAtom = atom({ plugin: 'slime-dashboard', key: 'updateStatus' } as const, '')
+// True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
+const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
 const tallyAtom = atom({ plugin: 'slime-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
 // The model requests of the main loop's current (or last) turn.
 const iterationAtom = atom({ plugin: 'slime-dashboard', key: 'iteration' } as const, 0)
@@ -329,6 +334,28 @@ const PLUGIN_ID = 'slime-dashboard@slime-dashboard'
 const MARKETPLACE = 'slime-dashboard'
 const lastLine = (text: string) => text.trim().split('\n').filter(Boolean).pop() ?? ''
 
+// Compare the installed commit (or, for a copy loaded from a folder, the
+// version) with GitHub's main. A failed read leaves the mark as it was.
+async function checkFreshness($: EngineInterface) {
+  try {
+    const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
+    const record = await $.fs.read(`${configDir}/plugins/installed_plugins.json`).catch(() => undefined)
+    const sha = typeof record === 'string' ? installedSha(record, PLUGIN_ID) : undefined
+    const headers = { 'User-Agent': 'slime-dashboard', Accept: 'application/vnd.github.sha' }
+    if (sha !== undefined) {
+      const reply = await $.http.fetch(REMOTE_SHA_URL, { headers })
+      const latest = reply.ok ? remoteSha(reply.text) : undefined
+      if (latest !== undefined) await update($, behindAtom, () => latest !== sha)
+      return
+    }
+    const reply = await $.http.fetch(REMOTE_MANIFEST_URL, { headers: { 'User-Agent': 'slime-dashboard' } })
+    const latest = reply.ok ? manifestVersion(reply.text) : undefined
+    if (latest !== undefined) await update($, behindAtom, () => latest !== VERSION)
+  } catch {
+    // Offline or refused: try again at the next check.
+  }
+}
+
 async function updatePlugin($: EngineInterface) {
   const say = (text: string) => update($, updateStatusAtom, () => text)
   await say('Updating: fetching the latest from GitHub…')
@@ -346,6 +373,7 @@ async function updatePlugin($: EngineInterface) {
         return
       }
     }
+    await update($, behindAtom, () => false)
     await say('Updated: reloading plugins…')
     await logEvent($, 'Updated from GitHub: reloading plugins')
     await $.command.run({ command: 'reload-plugins' })
@@ -436,6 +464,8 @@ export const register: Register = on => {
     void readLocalZone($)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
+    void checkFreshness($)
+    $.clock.every(FRESHNESS_MS, () => checkFreshness($))
 
     $.clock.every(TICK_MS, async () => {
       tick++
@@ -616,7 +646,7 @@ export const register: Register = on => {
     const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
       <Box flexDirection="row">
         <Text dimColor>{`${title} `}</Text>
-        <Button key={key} label={isOpen ? '▲' : '▼'} onPress={toggle} />
+        <Button key={key} label={isOpen ? '▼' : '▲'} onPress={toggle} />
       </Box>
     )
 
@@ -657,13 +687,16 @@ export const register: Register = on => {
     // Setting, at the very bottom: Update fetches the latest from GitHub.
     const settingsOpen = await read($, settingsOpenAtom)
     const updateStatus = await read($, updateStatusAtom)
+    const behind = await read($, behindAtom)
     const setting = (
       <Box flexDirection="column">
         {rule}
         {header('Setting', 'settings-toggle', settingsOpen, () => update($, settingsOpenAtom, o => !o))}
         {settingsOpen && (
           <Box flexDirection="column">
-            <Box flexDirection="row" marginLeft={2}>
+            <Box flexDirection="row" marginLeft={1}>
+              {/* A newer dashboard is on GitHub: a red ! in the indent before [Update]. */}
+              {behind ? <Text color="#e5383b" bold>!</Text> : <Text> </Text>}
               <Button key="update" label="[Update]" plain onPress={() => updatePlugin($)} />
               <Text dimColor>: update dashboard</Text>
             </Box>

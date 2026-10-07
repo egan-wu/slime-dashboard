@@ -35,6 +35,7 @@ declare module 'claude-code' {
       eventsOpen: boolean
       settingsOpen: boolean
       updateStatus: string
+      behind: boolean
     }
   }
 }
