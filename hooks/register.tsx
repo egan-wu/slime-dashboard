@@ -597,11 +597,7 @@ export const register: Register = on => {
         {propsOpen && (
           <Box flexDirection="column">
             <Box flexDirection="row">
-              {/* A button's label takes no color, so a square in the model's color leads it. */}
-              <Text>
-                {' Model: '}
-                <Text color={hex(info.body)}>■</Text>
-              </Text>
+              <Text>{' Model: '}</Text>
               <Button
                 key="model"
                 label={`[${info.name}]`}
