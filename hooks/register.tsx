@@ -14,7 +14,10 @@ import type { SlimeMinion, SlimeWeather } from '../types'
 const PANE = 'slime-subagent-dashboard'
 const SCENE = 'scene'
 const TICK_MS = 100
-const WEATHER_MS = 60 * 60 * 1000
+// The sky is read every quarter hour, so day turns to night close to sunset;
+// a read that fails is tried again two minutes later.
+const WEATHER_MS = 15 * 60 * 1000
+const WEATHER_RETRY_MS = 2 * 60 * 1000
 // Docked beside the fullscreen transcript, the sidebar asks for this width.
 const OPEN = { id: PANE, title: 'Slime', columns: 33 }
 // The model buttons under the scene: each switches the session with /model
@@ -176,14 +179,33 @@ async function dropGone($: EngineInterface) {
   await setMinions($, list => list.filter(m => !gone.includes(m)))
 }
 
-// Once an hour: is it day or night where this machine is, and what is the
-// sky doing. A failed or unreadable reply keeps the sky as it was.
-async function refreshWeather($: EngineInterface) {
-  const reply = await $.http.fetch(WEATHER_URL).catch(() => undefined)
-  const next = reply?.ok ? parseWeather(reply.text) : undefined
-  if (!next) return
-  weather = next
-  await update($, weatherAtom, () => next)
+// Is it day or night where this machine is, and what is the sky doing. A
+// failed or unreadable reply keeps the sky as it was and tries again soon.
+// Answers what it read, or why it read nothing, for `/slime-subagent-dashboard weather`.
+let retryPending = false
+async function refreshWeather($: EngineInterface): Promise<string> {
+  let why: string
+  try {
+    // wttr.in answers a browser with a page; asked as curl, with the line alone.
+    const reply = await $.http.fetch(WEATHER_URL, { headers: { 'User-Agent': 'curl/8' } })
+    const next = reply.ok ? parseWeather(reply.text) : undefined
+    if (next) {
+      weather = next
+      await update($, weatherAtom, () => next)
+      return `Weather: ${next.day ? 'day' : 'night'}, ${next.sky} (wttr.in said "${reply.text.trim()}").`
+    }
+    why = reply.ok ? `an unreadable reply "${reply.text.trim().slice(0, 60)}"` : `HTTP ${reply.status}`
+  } catch (error) {
+    why = error instanceof Error ? error.message : String(error)
+  }
+  if (!retryPending) {
+    retryPending = true
+    $.clock.after(WEATHER_RETRY_MS, () => {
+      retryPending = false
+      void refreshWeather($)
+    })
+  }
+  return `Weather: could not read wttr.in (${why}); the sky stays as it was and tries again in two minutes.`
 }
 
 async function refreshModel($: EngineInterface) {
@@ -250,17 +272,18 @@ async function manageSkills($: EngineInterface, args: string): Promise<string | 
     const list = await read($, skillsAtom)
     return list.length === 0 ? 'Skill Box: no skills registered.' : `Skill Box: ${list.map(s => `/${s}`).join(' ')}`
   }
-  if (verb) return 'Usage: /slime-subagent-dashboard [add <skill> | remove <skill> | list]'
+  if (verb === 'weather') return refreshWeather($)
+  if (verb) return 'Usage: /slime-subagent-dashboard [add <skill> | remove <skill> | list | weather]'
   return undefined
 }
 
-// Property's Effort button opens a row of the levels, each short-named;
-// picking one runs /effort with it and closes the row.
+// Property's Effort button opens a row of the levels, `[Low][Mid][High][xHigh][Max]`
+// (28 columns, one row of the pane); picking one runs /effort with it and closes the row.
 const EFFORTS = [
-  { level: 'low', name: 'Low', short: 'L' },
-  { level: 'medium', name: 'Medium', short: 'M' },
-  { level: 'high', name: 'High', short: 'H' },
-  { level: 'xhigh', name: 'xHigh', short: 'xH' },
+  { level: 'low', name: 'Low', short: 'Low' },
+  { level: 'medium', name: 'Medium', short: 'Mid' },
+  { level: 'high', name: 'High', short: 'High' },
+  { level: 'xhigh', name: 'xHigh', short: 'xHigh' },
   { level: 'max', name: 'Max', short: 'Max' },
 ]
 const effortName = (effort: string) =>
@@ -287,7 +310,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'slime-subagent-dashboard',
       description: 'Open the slime subagent dashboard pane, or manage its Skill Box',
-      argumentHint: '[add <skill> | remove <skill> | list]',
+      argumentHint: '[add <skill> | remove <skill> | list | weather]',
     })
     const kept = await $.store.get(SKILLS_KEY)
     if (Array.isArray(kept)) await update($, skillsAtom, () => kept.filter((s): s is string => typeof s === 'string'))
@@ -571,7 +594,10 @@ export const register: Register = on => {
         {header('Property', 'props-toggle', propsOpen, () => update($, propsOpenAtom, o => !o))}
         {propsOpen && (
           <Box flexDirection="column">
-            <Text>{` Model: ${info.name}`}</Text>
+            <Text>
+              {' Model: '}
+              <Text color={hex(info.body)}>{info.name}</Text>
+            </Text>
             <Box flexDirection="row">
               <Text>{' Effort: '}</Text>
               <Button

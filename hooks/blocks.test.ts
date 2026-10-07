@@ -117,7 +117,7 @@ test('Property lists Model and Effort first; Effort opens a row of levels to pic
 
     expect(await ui.find({ key: 'effort-high' })).toBeUndefined()
     await ui.press({ key: 'effort' })
-    expect((await ui.find({ key: 'effort-xhigh' }))?.text).toBe('[xH]')
+    expect((await ui.find({ key: 'effort-xhigh' }))?.text).toBe('[xHigh]')
     await ui.press({ key: 'effort-high' })
     expect(await ui.find({ key: 'effort-high' })).toBeUndefined()
     expect((await ui.find({ key: 'effort' }))?.text).toBe('[High]')
@@ -131,5 +131,39 @@ test('Property lists Model and Effort first; Effort opens a row of levels to pic
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'props-toggle' })
   expect((await ui.find({ key: 'effort' }))?.text).toBe('[xHigh]')
+  await ui.unmount()
+})
+
+test('/slime-subagent-dashboard weather reads the sky now, and says why when it cannot', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  let reply: { status: number; ok: boolean; text: string } | Error = { status: 200, ok: true, text: 'mmm|05:50:42|17:38:27|00:39:17+0800' }
+  const agents: string[] = []
+  on('http.fetch', async (_$, e) => {
+    agents.push(String(e.init?.headers?.['User-Agent']))
+    if (reply instanceof Error) return { deny: reply.message }
+    return { value: { ...reply, headers: {} } }
+  })
+  const weather = () =>
+    $.command.run({ command: PLUGIN, args: 'weather', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+  expect((await weather()).text).toBe('Weather: night, cloudy (wttr.in said "mmm|05:50:42|17:38:27|00:39:17+0800").')
+  expect(agents).toEqual(['curl/8'])
+
+  reply = { status: 503, ok: false, text: 'busy' }
+  expect((await weather()).text).toContain('could not read wttr.in (HTTP 503)')
+  reply = new Error('offline')
+  expect((await weather()).text).toMatch(/could not read wttr.in \(.*offline\)/)
+})
+
+test('the effort levels fit on one row of the pane', async ($, on) => {
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'props-toggle' })
+  await ui.press({ key: 'effort' })
+  const labels = await Promise.all(['low', 'medium', 'high', 'xhigh', 'max'].map(async l => (await ui.find({ key: `effort-${l}` }))?.text))
+  expect(labels).toEqual(['[Low]', '[Mid]', '[High]', '[xHigh]', '[Max]'])
+  // One space of indent, then the five labels: inside the pane's 32 columns.
+  expect(1 + labels.join('').length).toBeLessThanOrEqual(32)
   await ui.unmount()
 })

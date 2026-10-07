@@ -12,10 +12,10 @@ A Claude Code side pane in the spirit of the offline dino game, starring a slime
 - **Sub-agent Monitor**: lists the running subagents, each with its model and its task.
 - **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, with an **Unload** button that runs `/compact`. Out of HP or MP the slime stops with `x` eyes until a limit resets. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
 - **Waiting on you**: when a permission prompt or a question is waiting for an answer, the troop stops and a blinking `(?)` shows over the main slime.
-- **Property**: opens to show the model, the reasoning effort, the session's cache hit rate, the tokens it has used, the current turn's iterations, and how long the latest turn took. Pressing the effort opens a row of levels, `[L][M][H][xH][Max]`, and picking one runs `/effort` with it.
+- **Property**: opens to show the model, the reasoning effort, the session's cache hit rate, the tokens it has used, the current turn's iterations, and how long the latest turn took. Pressing the effort opens a row of levels, `[Low][Mid][High][xHigh][Max]`, and picking one runs `/effort` with it.
 - **Skill Box**: opens to a prompt field over the skills you have registered, five rows at a time. Pressing `[skill]` runs `/skill "prompt"`, or `/skill` alone with the field empty.
 - **Model buttons**: switch the session's model from the pane.
-- **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) once an hour (wttr.in places you by your IP address).
+- **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) every 15 minutes (wttr.in places you by your IP address). `/slime-subagent-dashboard weather` reads it now and says what it got, or why it got nothing.
 
 ## Install
 
@@ -33,6 +33,7 @@ Register skills for the Skill Box with the same command:
 /slime-subagent-dashboard add run-unit-test
 /slime-subagent-dashboard remove run-unit-test
 /slime-subagent-dashboard list
+/slime-subagent-dashboard weather
 ```
 
 It docks on the right only in Claude Code's fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`, 110 columns or more). Otherwise it sits above the prompt.
