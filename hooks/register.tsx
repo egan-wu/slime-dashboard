@@ -670,13 +670,22 @@ export const register: Register = on => {
         {skillsOpen && (
           <Box flexDirection="column">
             {Input && (
-              <Input
-                key="skill-prompt"
-                placeholder="prompt for the skill…"
-                value={skillPrompt}
-                onInput={(value: string) => update($, skillPromptAtom, () => value)}
-                onSubmit={(value: string) => update($, skillPromptAtom, () => value)}
-              />
+              // The prompt field stands out: a bright frame with a bold title,
+              // a prompt mark before the field, and how to use it while empty.
+              <Box flexDirection="column" borderStyle="round" borderColor={BAR.mp} paddingX={1}>
+                <Text bold color={BAR.mp}>
+                  Prompt for skill
+                </Text>
+                <Input
+                  key="skill-prompt"
+                  label="›"
+                  placeholder="type, then press a skill"
+                  submitLabel="keep"
+                  value={skillPrompt}
+                  onInput={(value: string) => update($, skillPromptAtom, () => value)}
+                  onSubmit={(value: string) => update($, skillPromptAtom, () => value)}
+                />
+              </Box>
             )}
             {skills.length === 0 ? (
               <Text dimColor>{' - none: /slime-subagent-dashboard\n   add <skill>'}</Text>
