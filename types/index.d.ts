@@ -22,6 +22,7 @@ declare module 'claude-code' {
       iteration: number
       lastTurnMs: number
       turnStartedAt: number
+      effort: string
     }
   }
 }

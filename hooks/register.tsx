@@ -48,6 +48,8 @@ const propsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'propsOpen
 const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
 // The model requests of the main loop's current (or last) turn.
 const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
+// The main loop's reasoning effort as its last model request was sent ('' before one).
+const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
 // The last turn's length, and when the running one started (0: none runs).
 const lastTurnMsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'lastTurnMs' } as const, 0)
 const turnStartedAtAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'turnStartedAt' } as const, 0)
@@ -250,6 +252,18 @@ async function manageSkills($: EngineInterface, args: string): Promise<string | 
   return undefined
 }
 
+// Property's Effort button steps through the levels with /effort, round again after max.
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+const EFFORT_NAMES: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh', max: 'Max' }
+const effortName = (effort: string) => (effort === '' ? '—' : (EFFORT_NAMES[effort] ?? effort))
+
+async function nextEffort($: EngineInterface) {
+  const at = EFFORTS.indexOf((await read($, effortAtom)) as (typeof EFFORTS)[number])
+  const level = EFFORTS[(at + 1) % EFFORTS.length]!
+  await $.command.run({ command: 'effort', args: level })
+  await update($, effortAtom, () => level)
+}
+
 async function pickModel($: EngineInterface, id: string) {
   await $.command.run({ command: 'model', args: id })
   await refreshModel($)
@@ -344,6 +358,7 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       await update($, iterationAtom, () => e.index + 1).catch(() => {})
+      if (e.effort !== undefined) await update($, effortAtom, () => String(e.effort)).catch(() => {})
       await setWaiting($, false).catch(() => {})
     }
 
@@ -520,6 +535,7 @@ export const register: Register = on => {
 
     // Property: the session's figures, shown once opened.
     const propsOpen = await read($, propsOpenAtom)
+    const effort = await read($, effortAtom)
     const tally = await read($, tallyAtom)
     const iteration = await read($, iterationAtom)
     const startedAt = await read($, turnStartedAtAtom)
@@ -536,6 +552,11 @@ export const register: Register = on => {
             <Text>{` Token Usage: ${compact(totalTokens(tally))}`}</Text>
             <Text>{` Iteration Rate: ${iteration}/∞`}</Text>
             <Text>{` Latest Command: ${secondsText(timerMs)}`}</Text>
+            <Text>{` Model: ${info.name}`}</Text>
+            <Box flexDirection="row">
+              <Text>{' Effort: '}</Text>
+              <Button key="effort" label={`[${effortName(effort)}]`} plain onPress={() => nextEffort($)} />
+            </Box>
           </Box>
         )}
       </Box>

@@ -99,3 +99,23 @@ test('the CP bar is the Unload button: either half runs /compact', async ($, on)
   }
   expect(compacts).toBe(2)
 })
+
+test('Property shows the model and an Effort button that steps through /effort', async ($, on) => {
+  mock.store(on)
+  const efforts: string[] = []
+  on('command.run', { command: 'effort' }, async (_$, e) => {
+    efforts.push(e.args)
+    return { text: '' }
+  })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'props-toggle' })
+    expect(await ui.find({ type: 'Text', text: /Model: / })).toBeDefined()
+    await ui.press({ key: 'effort' })
+    // Unread, it starts at Low; the second surface's press steps on to Medium.
+    expect((await ui.find({ key: 'effort' }))?.text).toBe(surface === 'terminal' ? '[Low]' : '[Medium]')
+    await ui.press({ key: 'props-toggle' })
+    await ui.unmount()
+  }
+  expect(efforts).toEqual(['low', 'medium'])
+})

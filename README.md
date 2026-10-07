@@ -12,7 +12,7 @@ A Claude Code side pane in the spirit of the offline dino game, starring a slime
 - **Sub-agent Monitor**: lists the running subagents, each with its model and its task.
 - **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, with an **Unload** button that runs `/compact`. Out of HP or MP the slime stops with `x` eyes until a limit resets. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
 - **Waiting on you**: when a permission prompt or a question is waiting for an answer, the troop stops and a blinking `(?)` shows over the main slime.
-- **Property**: opens to show the session's cache hit rate, the tokens it has used, the current turn's iterations, and how long the latest turn took.
+- **Property**: opens to show the session's cache hit rate, the tokens it has used, the current turn's iterations, how long the latest turn took, the model, and the reasoning effort. Pressing `[Effort]` steps through Low, Medium, High, xHigh and Max with `/effort`.
 - **Skill Box**: opens to a prompt field over the skills you have registered, five rows at a time. Pressing `[skill]` runs `/skill "prompt"`, or `/skill` alone with the field empty.
 - **Model buttons**: switch the session's model from the pane.
 - **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) once an hour (wttr.in places you by your IP address).
