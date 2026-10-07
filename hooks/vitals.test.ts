@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { frame, ROWS } from './scene'
+import { frame, POTION_COLORS, ROWS } from './scene'
 import { faceOf, filledOf, isDown, vitalsOf } from './vitals'
 
 test('a subscription: HP is the seven-day limit left, MP the five-hour one', async () => {
@@ -26,7 +26,7 @@ test('the face follows CP while walking, x when down', async () => {
   expect(faceOf(at(70), true)).toEqual({ eyes: '><', vein: true })
   expect(faceOf(at(90), true)).toEqual({ eyes: 'TT', vein: true })
   expect(faceOf(at(95), false)).toEqual({})
-  expect(faceOf({ plan: 'subscription', hp: 0, mp: 50, cp: 95 }, true)).toEqual({ eyes: 'x', down: true })
+  expect(faceOf({ plan: 'subscription', hp: 0, mp: 50, cp: 95 }, true)).toEqual({ eyes: 'x', down: true, potions: ['hp'] })
 })
 
 test('bars fill by cells', async () => {
@@ -53,4 +53,25 @@ test('the scene draws each face on the main slime', async () => {
   expect(draw({ eyes: 'TT', vein: true })).toMatch(/T.*T/)
   expect(draw({ eyes: 'TT', vein: true })).toContain('#')
   expect(draw({})).not.toMatch(/[x#<>T]/)
+})
+
+test('out of MP, HP or both: which potions the slime shows', async () => {
+  expect(faceOf({ plan: 'subscription', hp: 40, mp: 0, cp: 10 }, true).potions).toEqual(['mp'])
+  expect(faceOf({ plan: 'subscription', hp: 0, mp: 0, cp: 10 }, true).potions).toEqual(['mp', 'hp'])
+  expect(faceOf({ plan: 'api', hp: 100, mp: 0, cp: 10 }, true).potions).toBeUndefined()
+})
+
+test('a potion ring flashes at the main slime\'s upper left', async () => {
+  const pixels = (tick: number, potions: ('hp' | 'mp')[]) => {
+    // A yellow Haiku slime, whose colors neither potion shares.
+    const cells = frame(30, off(), tick, true, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, { eyes: 'x', down: true, potions })
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    const colors = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) colors.add(words[i + 1]!).add(words[i + 2]!)
+    return colors
+  }
+  expect(pixels(0, ['mp']).has(POTION_COLORS.mp.p)).toBe(true)
+  expect(pixels(0, ['mp']).has(POTION_COLORS.hp.p)).toBe(false)
+  expect(pixels(0, ['mp', 'hp']).has(POTION_COLORS.hp.p)).toBe(true)
+  expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
 })

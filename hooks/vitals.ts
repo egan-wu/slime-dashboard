@@ -39,12 +39,20 @@ export const isDown = (v: Vitals) => v.hp <= 0 || (v.plan === 'subscription' && 
 export type Eyes = 'x' | '><' | 'TT'
 // `ask`: the session waits on the person (a permission prompt, a question),
 // so the troop holds still with a blinking question mark over the main slime.
-export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean }
+// `potions`: the pools that ran dry, each shown as a flashing potion in a
+// ring at the main slime's upper left: blue for MP, red for HP.
+export type Potion = 'hp' | 'mp'
+export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[] }
 
 // Down: it stops with crossed-out eyes. Walking with a full head: squinting
 // from 50%, a vein beside its head from 70%, in tears from 90%.
 export function faceOf(v: Vitals, walking: boolean): Face {
-  if (isDown(v)) return { eyes: 'x', down: true }
+  if (isDown(v)) {
+    const potions: Potion[] = []
+    if (v.plan === 'subscription' && v.mp <= 0) potions.push('mp')
+    if (v.hp <= 0) potions.push('hp')
+    return { eyes: 'x', down: true, potions }
+  }
   if (!walking || v.cp < 50) return {}
   return { eyes: v.cp >= 90 ? 'TT' : '><', vein: v.cp >= 70 }
 }

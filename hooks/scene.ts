@@ -303,6 +303,22 @@ const BUBBLE = [
 export const bubbleCell = (columns: number) => ({ row: 2, col: homeCx(columns) })
 export const bubbleFill = (tick: number) => (Math.floor(tick / 5) % 2 === 0 ? ASK.yellow : ASK.white)
 export const ASK = { yellow: 0xffd23f, white: 0xffffff, mark: 0x101018 }
+// Out of MP or HP: a ring at the main slime's upper left holding a potion,
+// blue mana or red health, flashing on two beats and off one. With both dry
+// the MP ring stands nearest the slime and the HP ring beyond it.
+const POTION = [
+  '..OOO..',
+  '.O.k.O.',
+  'O..p..O',
+  'O.pPp.O',
+  'O.ppp.O',
+  '.O...O.',
+  '..OOO..',
+]
+export const POTION_COLORS = {
+  mp: { O: 0xe8e8f0, k: 0x9c6644, p: 0x3a86ff, P: 0x8fbcff },
+  hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
+} as const
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -550,6 +566,12 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
+    if (face.potions && Math.floor(tick / 4) % 3 !== 2) {
+      const width = POTION[0]!.length
+      face.potions.forEach((kind, i) =>
+        draw({ rows: POTION, colors: POTION_COLORS[kind] }, left - (width + 1) * (i + 1), top - 2),
+      )
+    }
     // The bubble's tail rests on the head.
     if (face.ask) draw({ rows: BUBBLE, colors: { B: bubbleFill(tick) } }, cx - (BUBBLE[0]!.length >> 1), top - 1)
   } else {
