@@ -1,4 +1,6 @@
 export type SlimeModel = string
+// A Skill Box skill (hooks/skills.ts): its command, category and dim description.
+export type SlimeSkill = { name: string; category: string; description?: string; command?: string }
 // One line of the Event Message block (hooks/events.ts): when, and what happened.
 export type SlimeEventEntry = { at: number; text: string }
 // Tokens the session's turns used, by kind (hooks/props.ts).
@@ -15,10 +17,11 @@ declare module 'claude-code' {
     'slime-subagent-dashboard': {
       busy: boolean; model: SlimeModel; minions: SlimeMinion[]; weather: SlimeWeather; vitals: SlimeVitals
       waiting: boolean
-      skills: string[]
+      skills: SlimeSkill[]
       skillsOpen: boolean
       skillPrompt: string
-      skillTop: number
+      skillTops: Record<string, number>
+      skillCatsClosed: string[]
       propsOpen: boolean
       tally: SlimeTally
       iteration: number

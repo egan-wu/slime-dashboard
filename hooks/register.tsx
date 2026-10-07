@@ -7,6 +7,8 @@ import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
 import type { SlimeEvent } from './events'
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import type { Tally } from './props'
+import { grouped, parseAdd, skillsFrom } from './skills'
+import type { Skill } from './skills'
 import { cleanSummary, wrapSummary } from './summary'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
@@ -44,10 +46,13 @@ const waitingAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'waiting' } 
 // The Skill Box: the skills registered with /slime-subagent-dashboard add (kept
 // in the store across sessions), whether it is open, the prompt typed for
 // them, and the first of the five rows shown.
-const skillsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skills' } as const, [] as string[])
+const skillsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skills' } as const, [] as Skill[])
 const skillsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillsOpen' } as const, false)
 const skillPromptAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillPrompt' } as const, '')
-const skillTopAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillTop' } as const, 0)
+// Per category: the first of its five rows shown, and whether it is closed
+// (a category is open until closed).
+const skillTopsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillTops' } as const, {} as Record<string, number>)
+const skillCatsClosedAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
 const propsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'propsOpen' } as const, false)
 const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
@@ -262,12 +267,19 @@ async function refreshVitals($: EngineInterface) {
   if (usage) await setVitals($, vitalsOf(usage.rateLimits, usage.context.percent))
 }
 
-// The bars' colors: HP a bright red, MP a bright blue. CP is drawn in the
-// terminal's own text color, since it is a button and a button's label takes
-// no color of its own.
+// The bars' colors: HP a bright red, MP a bright blue; CP shades from a
+// lighter to a darker grey along its length.
 const BAR = { hp: '#ff5c5c', mp: '#4db8ff' }
-// The word written across the middle of the CP bar: pressing the bar compacts.
-const UNLOAD = 'UNLOAD'
+const CP_FROM = 0x9e9e9e
+const CP_TO = 0x4a4a4a
+function cpColor(i: number, cells: number) {
+  const mix = (shift: number) => {
+    const a = (CP_FROM >> shift) & 0xff
+    const b = (CP_TO >> shift) & 0xff
+    return Math.round(a + ((b - a) * i) / Math.max(1, cells - 1)) << shift
+  }
+  return hex(mix(16) | mix(8) | mix(0))
+}
 
 async function setWaiting($: EngineInterface, value: boolean) {
   if (value === waiting) return
@@ -276,7 +288,7 @@ async function setWaiting($: EngineInterface, value: boolean) {
   await logEvent($, value ? '? Waiting for your answer' : 'Answered: the troop moves on')
 }
 
-async function setSkills($: EngineInterface, fn: (list: string[]) => string[]) {
+async function setSkills($: EngineInterface, fn: (list: Skill[]) => Skill[]) {
   const list = fn(await read($, skillsAtom))
   await update($, skillsAtom, () => list)
   await $.store.set(SKILLS_KEY, list)
@@ -285,7 +297,8 @@ async function setSkills($: EngineInterface, fn: (list: string[]) => string[]) {
 
 // A skill's button: run it as the person would type it, with the Skill Box's
 // prompt after it in quotes when one is typed; the field then clears.
-async function runSkill($: EngineInterface, name: string) {
+async function runSkill($: EngineInterface, skill: Skill) {
+  const name = skill.command ?? skill.name
   const prompt = (await read($, skillPromptAtom)).trim()
   const args = prompt === '' ? '' : `"${prompt.replace(/"/g, '\\"')}"`
   const typed = `/${name}${args === '' ? '' : ` ${args}`}`
@@ -304,24 +317,32 @@ async function runSkill($: EngineInterface, name: string) {
   }
 }
 
-// `add <skill>`, `remove <skill>`, `list`, or nothing to open the pane.
+const USAGE =
+  'Usage: /slime-subagent-dashboard [add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]'
+
+// `add <skill> [--category <name>] [--desc <words>]`, `remove <skill>`,
+// `list`, `weather`, or nothing to open the pane. Adding a skill again files
+// it anew (its category and description replaced).
 async function manageSkills($: EngineInterface, args: string): Promise<string | undefined> {
-  const [verb, ...rest] = args.trim().split(/\s+/)
-  const name = rest.join(' ').replace(/^\//, '')
-  if (verb === 'add' && name) {
-    const list = await setSkills($, l => (l.includes(name) ? l : [...l, name]))
-    return `Skill Box: added /${name} (${list.length} registered).`
+  const [verb = '', ...rest] = args.trim().split(/\s+/)
+  const name = (rest[0] ?? '').replace(/^\//, '')
+  if (verb === 'add') {
+    const skill = parseAdd(rest.join(' '))
+    if (!skill) return USAGE
+    const list = await setSkills($, l => [...l.filter(s => s.name !== skill.name), skill])
+    return `Skill Box: added /${skill.name} under ${skill.category} (${list.length} registered).`
   }
   if (verb === 'remove' && name) {
-    const list = await setSkills($, l => l.filter(s => s !== name))
+    const list = await setSkills($, l => l.filter(s => s.name !== name))
     return `Skill Box: removed /${name} (${list.length} registered).`
   }
   if (verb === 'list') {
-    const list = await read($, skillsAtom)
-    return list.length === 0 ? 'Skill Box: no skills registered.' : `Skill Box: ${list.map(s => `/${s}`).join(' ')}`
+    return grouped(await read($, skillsAtom))
+      .map(g => `${g.category}: ${g.skills.map(s => `/${s.command ?? s.name}${s.command ? ` (${s.name})` : ''}`).join(' ')}`)
+      .join('\n')
   }
   if (verb === 'weather') return refreshWeather($)
-  if (verb) return 'Usage: /slime-subagent-dashboard [add <skill> | remove <skill> | list | weather]'
+  if (verb) return USAGE
   return undefined
 }
 
@@ -358,10 +379,11 @@ export const register: Register = on => {
     await $.command.register({
       name: 'slime-subagent-dashboard',
       description: 'Open the slime subagent dashboard pane, or manage its Skill Box',
-      argumentHint: '[add <skill> | remove <skill> | list | weather]',
+      argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]',
     })
     const kept = await $.store.get(SKILLS_KEY)
-    if (Array.isArray(kept)) await update($, skillsAtom, () => kept.filter((s): s is string => typeof s === 'string'))
+    // Names kept before categories come back filed under General.
+    await update($, skillsAtom, () => skillsFrom(kept))
     waiting = await read($, waitingAtom)
     busy = await read($, busyAtom)
     // Slimes that were dropping out when the module reloaded are simply gone.
@@ -427,7 +449,7 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  // /compact, from the CP bar or typed: the context has been unloaded.
+  // /compact, from the Skill Box's Unload or typed: the context has been unloaded.
   on('command.run', { command: 'compact' }, async ($, e, next) => {
     const ran = await next(e)
     await logEvent($, 'Unloaded: the context was compacted')
@@ -639,32 +661,22 @@ export const register: Register = on => {
         </Text>
       )
     }
-    // CP: the bar is the Unload button. UNLOAD is written across its middle;
-    // the filled part is one button drawn bright and the rest another drawn
-    // dim, so the word shows how full the window is, and pressing either half
-    // runs /compact.
-    const unload = () => $.command.run({ command: 'compact' })
-    // CP's closing bracket lines up with the one above it: HP's on an API key
-    // (both ten cells), MP's on a subscription, past HP's 5-cell bar and
-    // percentage (`HP [` 4 + 5 + `] ` 2 + 4, a space, `MP [` 4 + 5, less `CP [`).
+    // CP shades from a lighter grey to a darker one along its length. Its
+    // closing bracket lines up with the one above it: HP's on an API key (both
+    // ten cells), MP's on a subscription, past HP's 5-cell bar and percentage
+    // (`HP [` 4 + 5 + `] ` 2 + 4, a space, `MP [` 4 + 5, less `CP [`).
     const CP_CELLS = v.plan === 'subscription' ? 4 + 5 + 2 + 4 + 1 + 4 + 5 - 4 : 10
     const cpFilled = filledOf(v.cp, CP_CELLS)
-    const from = (CP_CELLS - UNLOAD.length) >> 1
-    const cpCells = Array.from({ length: CP_CELLS }, (_, i) =>
-      i >= from && i < from + UNLOAD.length ? UNLOAD[i - from]! : i < cpFilled ? '█' : '░',
-    )
     const cpRow = (
-      <Box flexDirection="row">
-        <Text>
-          <Text bold>CP</Text>
-          {' ['}
-        </Text>
-        {cpFilled > 0 && <Button key="unload" label={cpCells.slice(0, cpFilled).join('')} plain onPress={unload} />}
-        {cpFilled < CP_CELLS && (
-          <Button key="unload-rest" label={cpCells.slice(cpFilled).join('')} plain dimColor onPress={unload} />
-        )}
-        <Text>{amount(v.cp)}</Text>
-      </Box>
+      <Text>
+        <Text bold>CP</Text>
+        {' ['}
+        {Array.from({ length: cpFilled }, (_, i) => (
+          <Text color={cpColor(i, CP_CELLS)}>█</Text>
+        ))}
+        <Text dimColor>{'░'.repeat(CP_CELLS - cpFilled)}</Text>
+        {amount(v.cp)}
+      </Text>
     )
     const stats = (
       <Box flexDirection="column">
@@ -756,14 +768,53 @@ export const register: Register = on => {
       </Box>
     )
 
-    // Skill Box: a prompt field over the registered skills, five rows at a
-    // time; each skill's button runs it with the prompt.
-    const skills = await read($, skillsAtom)
+    // Skill Box: a prompt field over the skills, filed by category. Each
+    // category opens and closes and shows five rows at a time; each skill's
+    // button runs it with the prompt, its description dim after it.
+    const groups = grouped(await read($, skillsAtom))
     const skillsOpen = await read($, skillsOpenAtom)
     const skillPrompt = await read($, skillPromptAtom)
-    const top = Math.max(0, Math.min(await read($, skillTopAtom), Math.max(0, skills.length - SKILL_ROWS)))
-    const scroll = (by: number) =>
-      update($, skillTopAtom, n => Math.max(0, Math.min(n + by, Math.max(0, skills.length - SKILL_ROWS))))
+    const tops = await read($, skillTopsAtom)
+    const closed = await read($, skillCatsClosedAtom)
+    const topOf = (g: { category: string; skills: Skill[] }) =>
+      Math.max(0, Math.min(tops[g.category] ?? 0, Math.max(0, g.skills.length - SKILL_ROWS)))
+    const scroll = (g: { category: string; skills: Skill[] }, by: number) =>
+      update($, skillTopsAtom, t => ({
+        ...t,
+        [g.category]: Math.max(0, Math.min((t[g.category] ?? 0) + by, Math.max(0, g.skills.length - SKILL_ROWS))),
+      }))
+    const toggleCategory = (category: string) =>
+      update($, skillCatsClosedAtom, c => (c.includes(category) ? c.filter(x => x !== category) : [...c, category]))
+    const categories = groups.map(g => {
+      const isOpen = !closed.includes(g.category)
+      const top = topOf(g)
+      return (
+        <Box key={`skillcat-box-${g.category}`} flexDirection="column">
+          <Box flexDirection="row">
+            <Button
+              key={`skillcat-${g.category}`}
+              label={`${isOpen ? '▾' : '▸'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
+              plain
+              onPress={() => toggleCategory(g.category)}
+            />
+          </Box>
+          {isOpen &&
+            g.skills.slice(top, top + SKILL_ROWS).map(skill => (
+              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
+                <Button key={`skill-${skill.name}`} label={`[${skill.name}]`} plain onPress={() => runSkill($, skill)} />
+                {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
+              </Box>
+            ))}
+          {isOpen && g.skills.length > SKILL_ROWS && (
+            <Box flexDirection="row" gap={1} marginLeft={2}>
+              <Button key={`skills-up-${g.category}`} label="▲" plain onPress={() => scroll(g, -1)} />
+              <Button key={`skills-down-${g.category}`} label="▼" plain onPress={() => scroll(g, 1)} />
+              <Text dimColor>{`${top + 1}-${Math.min(top + SKILL_ROWS, g.skills.length)}/${g.skills.length}`}</Text>
+            </Box>
+          )}
+        </Box>
+      )
+    })
     const skillBox = (
       <Box flexDirection="column">
         {rule}
@@ -788,20 +839,7 @@ export const register: Register = on => {
                 />
               </Box>
             )}
-            {skills.length === 0 ? (
-              <Text dimColor>{' - none: /slime-subagent-dashboard\n   add <skill>'}</Text>
-            ) : (
-              skills.slice(top, top + SKILL_ROWS).map(name => (
-                <Button key={`skill-${name}`} label={`[${name}]`} plain onPress={() => runSkill($, name)} />
-              ))
-            )}
-            {skills.length > SKILL_ROWS && (
-              <Box flexDirection="row" gap={1}>
-                <Button key="skills-up" label="▲" plain onPress={() => scroll(-1)} />
-                <Button key="skills-down" label="▼" plain onPress={() => scroll(1)} />
-                <Text dimColor>{`${top + 1}-${Math.min(top + SKILL_ROWS, skills.length)}/${skills.length}`}</Text>
-              </Box>
-            )}
+            {categories}
           </Box>
         )}
       </Box>

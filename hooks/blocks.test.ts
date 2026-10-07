@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import { addEvent, offsetOf, stamp } from './events'
 import { ASK, frame, ROWS } from './scene'
+import { grouped, parseAdd, skillsFrom } from './skills'
 
 const PLUGIN = 'slime-subagent-dashboard'
 const PANE = {
@@ -67,7 +68,7 @@ test('the Skill Box sends a skill with the typed prompt, the Property block open
   const manage = (args: string) =>
     $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   expect((await manage('add run-unit-test')).text).toContain('added /run-unit-test')
-  expect((await manage('add /lint')).text).toContain('added /lint (2 registered)')
+  expect((await manage('add /lint')).text).toContain('added /lint under General (2 registered)')
 
   for (const surface of ['terminal', 'desktop'] as const) {
     ran.length = 0
@@ -88,8 +89,9 @@ test('the Skill Box sends a skill with the typed prompt, the Property block open
   }
 })
 
-test('the CP bar is the Unload button: either half runs /compact', async ($, on) => {
+test('General holds Unload, which runs /compact; the CP bar is no button', async ($, on) => {
   mock.store(on)
+  mock.clock(on)
   let compacts = 0
   on('command.run', { command: 'compact' }, async () => {
     compacts++
@@ -103,18 +105,36 @@ test('the CP bar is the Unload button: either half runs /compact', async ($, on)
   })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    for (const key of ['unload', 'unload-rest']) {
-      const half = await ui.find({ key })
-      expect(half).toBeDefined()
-    }
-    const text = `${(await ui.find({ key: 'unload' }))?.text}${(await ui.find({ key: 'unload-rest' }))?.text}`
-    expect(text).toContain('UNLOAD')
-    // CP's bracket stands under MP's: both bars end in the same column.
-    if (surface === 'terminal') expect(text.length).toBe(21)
-    await ui.press({ key: 'unload-rest' })
+    expect(await ui.find({ key: 'unload' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /UNLOAD/ })).toBeUndefined()
+    await ui.press({ key: 'skills-toggle' })
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▾ General')
+    expect((await ui.find({ key: 'skill-Unload' }))?.text).toBe('[Unload]')
+    expect(await ui.find({ type: 'Text', text: ': compact context window' })).toBeDefined()
+    await ui.press({ key: 'skill-Unload' })
+    // A category closes to its title and count, and opens again.
+    await ui.press({ key: 'skillcat-General' })
+    expect(await ui.find({ key: 'skill-Unload' })).toBeUndefined()
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▸ General (1)')
+    await ui.press({ key: 'skillcat-General' })
+    await ui.press({ key: 'skills-toggle' })
     await ui.unmount()
   }
   expect(compacts).toBe(2)
+})
+
+test('skills file under a category with a dim description; old plain names read as General', async ($, on) => {
+  mock.store(on, { skills: ['timer'] })
+  mock.clock(on)
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  expect((await manage('add lint --category Code --desc run the linter')).text).toBe('Skill Box: added /lint under Code (1 registered).')
+  expect((await manage('list')).text).toBe('General: /compact (Unload)\nCode: /lint')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  expect((await ui.find({ key: 'skillcat-Code' }))?.text).toBe('▾ Code')
+  expect(await ui.find({ type: 'Text', text: ': run the linter' })).toBeDefined()
+  await ui.unmount()
 })
 
 test('Property lists Model and Effort first; Effort opens a row of levels to pick from', async ($, on) => {
@@ -289,4 +309,14 @@ test('Sub-agent Monitor and Event Message open and close, closed titles counting
     expect(await shown('Effort: High')).toBe(true)
     await ui.unmount()
   }
+})
+
+test('parseAdd and grouped: categories in order, General first with Unload', async () => {
+  expect(parseAdd('timer')).toEqual({ name: 'timer', category: 'General' })
+  expect(parseAdd('/lint --category Code --desc run the linter')).toEqual({ name: 'lint', category: 'Code', description: 'run the linter' })
+  expect(parseAdd('deploy --desc ship it')).toEqual({ name: 'deploy', category: 'General', description: 'ship it' })
+  expect(parseAdd('')).toBeUndefined()
+  expect(skillsFrom(['timer'])).toEqual([{ name: 'timer', category: 'General' }])
+  const groups = grouped([{ name: 'lint', category: 'Code' }, { name: 'timer', category: 'General' }])
+  expect(groups.map(g => [g.category, g.skills.map(s => s.name)])).toEqual([['General', ['Unload', 'timer']], ['Code', ['lint']]])
 })
