@@ -192,3 +192,23 @@ test('Model opens a row of the families; picking one runs /model', async ($, on)
   }
   expect(models).toEqual(['sonnet', 'sonnet'])
 })
+
+test('a skill that does not run says why and keeps the prompt', async ($, on) => {
+  mock.store(on)
+  const toasts: string[] = []
+  on('ui.toast', async (_$, e) => {
+    toasts.push(String((e as { text?: string }).text ?? e))
+    return { value: undefined }
+  })
+  // Nothing answers /nope: as an unknown skill, its run rejects.
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await manage('add nope')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  await ui.input({ key: 'skill-prompt', text: '30', kind: 'change' })
+  await ui.press({ key: 'skill-nope' })
+  expect(toasts.some(t => t.includes('sending /nope "30"'))).toBe(true)
+  expect(toasts.some(t => t.includes('/nope "30" did not run'))).toBe(true)
+  await ui.unmount()
+})

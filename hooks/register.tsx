@@ -253,8 +253,18 @@ async function setSkills($: EngineInterface, fn: (list: string[]) => string[]) {
 async function runSkill($: EngineInterface, name: string) {
   const prompt = (await read($, skillPromptAtom)).trim()
   const args = prompt === '' ? '' : `"${prompt.replace(/"/g, '\\"')}"`
-  await update($, skillPromptAtom, () => '')
-  await $.command.run({ command: name, args })
+  const typed = `/${name}${args === '' ? '' : ` ${args}`}`
+  // Said at once, since the run itself waits until the session is idle.
+  $.ui.toast(`Skill Box: sending ${typed}`)
+  try {
+    await $.command.run({ command: name, args })
+    await update($, skillPromptAtom, () => '')
+  } catch (error) {
+    // An unknown skill (not in this session's slash commands) lands here; the
+    // prompt stays in the field to try again.
+    const why = error instanceof Error ? error.message : String(error)
+    $.ui.toast(`Skill Box: ${typed} did not run: ${why}`)
+  }
 }
 
 // `add <skill>`, `remove <skill>`, `list`, or nothing to open the pane.
