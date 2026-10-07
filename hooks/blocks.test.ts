@@ -113,7 +113,6 @@ test('Property lists Model and Effort first; Effort opens a row of levels to pic
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
     const at = (pattern: RegExp) => texts.findIndex(t => pattern.test(t ?? ''))
     expect(at(/Model: /)).toBeLessThan(at(/Effort: /))
-    expect(await ui.find({ type: 'Text', text: /^\[.+\]$/ })).toBeDefined()
     expect(at(/Effort: /)).toBeLessThan(at(/Cache Hit Rate/))
 
     expect(await ui.find({ key: 'effort-high' })).toBeUndefined()
@@ -167,4 +166,29 @@ test('the effort levels fit on one row of the pane', async ($, on) => {
   // One space of indent, then the five labels: inside the pane's 32 columns.
   expect(1 + labels.join('').length).toBeLessThanOrEqual(32)
   await ui.unmount()
+})
+
+test('Model opens a row of the families; picking one runs /model', async ($, on) => {
+  mock.store(on)
+  const models: string[] = []
+  on('command.run', { command: 'model' }, async (_$, e) => {
+    models.push(e.args)
+    return { text: '' }
+  })
+  on('session.model', async () => ({ value: 'claude-opus-5-5' }))
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'props-toggle' })
+    expect((await ui.find({ key: 'model' }))?.text).toMatch(/^\[.+\]$/)
+    expect(await ui.find({ key: 'model-pick-haiku' })).toBeUndefined()
+    await ui.press({ key: 'model' })
+    const labels = await Promise.all(['haiku', 'sonnet', 'opus', 'fable'].map(async m => (await ui.find({ key: `model-pick-${m}` }))?.text))
+    expect(labels).toEqual(['[Haiku]', '[Sonnet]', '[Opus]', '[Fable]'])
+    expect(1 + labels.join('').length).toBeLessThanOrEqual(32)
+    await ui.press({ key: 'model-pick-sonnet' })
+    expect(await ui.find({ key: 'model-pick-haiku' })).toBeUndefined()
+    await ui.press({ key: 'props-toggle' })
+    await ui.unmount()
+  }
+  expect(models).toEqual(['sonnet', 'sonnet'])
 })

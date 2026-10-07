@@ -54,6 +54,7 @@ const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration
 // The main loop's reasoning effort as its last model request was sent ('' before one).
 const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
 // Whether the row of effort levels under Property's Effort is open.
+const modelOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'modelOpen' } as const, false)
 const effortOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effortOpen' } as const, false)
 // The last turn's length, and when the running one started (0: none runs).
 const lastTurnMsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'lastTurnMs' } as const, 0)
@@ -582,6 +583,7 @@ export const register: Register = on => {
     const propsOpen = await read($, propsOpenAtom)
     const effort = await read($, effortAtom)
     const effortOpen = await read($, effortOpenAtom)
+    const modelOpen = await read($, modelOpenAtom)
     const tally = await read($, tallyAtom)
     const iteration = await read($, iterationAtom)
     const startedAt = await read($, turnStartedAtAtom)
@@ -594,10 +596,37 @@ export const register: Register = on => {
         {header('Property', 'props-toggle', propsOpen, () => update($, propsOpenAtom, o => !o))}
         {propsOpen && (
           <Box flexDirection="column">
-            <Text>
-              {' Model: '}
-              <Text color={hex(info.body)}>{`[${info.name}]`}</Text>
-            </Text>
+            <Box flexDirection="row">
+              {/* A button's label takes no color, so a square in the model's color leads it. */}
+              <Text>
+                {' Model: '}
+                <Text color={hex(info.body)}>■</Text>
+              </Text>
+              <Button
+                key="model"
+                label={`[${info.name}]`}
+                plain
+                onPress={() => update($, modelOpenAtom, o => !o)}
+              />
+            </Box>
+            {modelOpen && (
+              // The families, the current one bright and the rest dim; each
+              // runs /model with its alias, the family's newest model.
+              <Box flexDirection="row" marginLeft={1}>
+                {PICKS.map(pick => (
+                  <Button
+                    key={`model-pick-${pick.id}`}
+                    label={`[${pick.label}]`}
+                    plain
+                    dimColor={!new RegExp(pick.id, 'i').test(current)}
+                    onPress={async () => {
+                      await update($, modelOpenAtom, () => false)
+                      await pickModel($, pick.id)
+                    }}
+                  />
+                ))}
+              </Box>
+            )}
             <Box flexDirection="row">
               <Text>{' Effort: '}</Text>
               <Button

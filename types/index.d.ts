@@ -24,6 +24,7 @@ declare module 'claude-code' {
       turnStartedAt: number
       effort: string
       effortOpen: boolean
+      modelOpen: boolean
     }
   }
 }
