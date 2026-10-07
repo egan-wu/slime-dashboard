@@ -2,6 +2,10 @@
 
 A Claude Code side pane in the spirit of the offline dino game, starring a slime.
 
+| Idle | Busy, with three subagents |
+| --- | --- |
+| <img src="docs/idle.png" width="320" alt="Idle: the slime sleeps at night under the stars, no subagents running, context window 18%"> | <img src="docs/busy.png" width="320" alt="Busy: the red Opus slime leaps a rock with yellow Haiku and blue Sonnet slimes behind, three subagents listed, context window 42%"> |
+
 - **Busy / idle**: while Claude works, the slime travels and clouds, birds, trees and rocks scroll past at their own speeds. Once the turn ends it falls asleep: clouds and birds keep drifting, while trees and rocks stand still.
 - **Model colors**: the slime is purple on Fable, red on Opus, blue on Sonnet and yellow on Haiku.
 - **Subagents**: each subagent buds off a little slime in its model's color. When the work is done the troop finds a treasure chest.
