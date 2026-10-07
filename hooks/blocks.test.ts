@@ -342,7 +342,7 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
   expect(await ui.find({ key: 'update' })).toBeUndefined()
   await ui.press({ key: 'settings-toggle' })
   expect((await ui.find({ key: 'update' }))?.text).toBe('[Update]')
-  expect(await ui.find({ type: 'Text', text: ': update slime-dashboard' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ': update dashboard' })).toBeDefined()
 
   await ui.press({ key: 'update' })
   expect(ran).toEqual([

@@ -664,7 +664,7 @@ export const register: Register = on => {
           <Box flexDirection="column">
             <Box flexDirection="row" marginLeft={2}>
               <Button key="update" label="[Update]" plain onPress={() => updatePlugin($)} />
-              <Text dimColor>: update slime-dashboard</Text>
+              <Text dimColor>: update dashboard</Text>
             </Box>
             {updateStatus !== '' && (
               <Text dimColor wrap="wrap">{`  ${updateStatus}`}</Text>
