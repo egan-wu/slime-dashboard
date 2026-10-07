@@ -257,7 +257,7 @@ test('the Event Message block shows the newest three, each framed, stamp then su
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
-  const from = texts.indexOf('Event Message')
+  const from = texts.indexOf('Event Message ')
   expect(from).toBeGreaterThan(-1)
   const after = texts.slice(from + 1)
   // Newest first, three of the four; each stamp row then its summary.
@@ -266,4 +266,27 @@ test('the Event Message block shows the newest three, each framed, stamp then su
   // A summary too long for the frame goes on to a second row.
   expect(after).toContain('compacted')
   await ui.unmount()
+})
+
+test('Sub-agent Monitor and Event Message open and close, closed titles counting what they hold', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  on('command.run', { command: 'effort' }, async () => ({ text: '' }))
+  await $.command.run({ command: 'effort', args: 'high', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const shown = async (text: string) => (await ui.findAll({ type: 'Text' })).some(t => t.text === text)
+    expect(await shown(' - none')).toBe(true)
+    expect(await shown('Effort: High')).toBe(true)
+    await ui.press({ key: 'monitor-toggle' })
+    await ui.press({ key: 'events-toggle' })
+    expect(await shown('Sub-agent Monitor (0) ')).toBe(true)
+    expect(await shown('Event Message (1) ')).toBe(true)
+    expect(await shown(' - none')).toBe(false)
+    expect(await shown('Effort: High')).toBe(false)
+    await ui.press({ key: 'monitor-toggle' })
+    await ui.press({ key: 'events-toggle' })
+    expect(await shown('Effort: High')).toBe(true)
+    await ui.unmount()
+  }
 })

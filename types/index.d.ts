@@ -28,6 +28,8 @@ declare module 'claude-code' {
       effortOpen: boolean
       modelOpen: boolean
       events: SlimeEventEntry[]
+      monitorOpen: boolean
+      eventsOpen: boolean
     }
   }
 }

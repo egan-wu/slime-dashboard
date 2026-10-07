@@ -57,6 +57,9 @@ const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration
 const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
 // The Event Message block's events, newest first.
 const eventsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'events' } as const, [] as SlimeEvent[])
+// Whether Sub-agent Monitor and Event Message are open; both start open.
+const monitorOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'monitorOpen' } as const, true)
+const eventsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'eventsOpen' } as const, true)
 // Whether the row of effort levels under Property's Effort is open.
 const modelOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'modelOpen' } as const, false)
 const effortOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effortOpen' } as const, false)
@@ -547,11 +550,27 @@ export const register: Register = on => {
     const INDENT = '    - '
     const HANG = ' '.repeat(INDENT.length)
     const width = Math.max(4, (columns || OPEN.columns) - INDENT.length - 1)
+    const rule = <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
+    // A block's title and the button that opens or closes it.
+    const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
+      <Box flexDirection="row">
+        <Text dimColor>{`${title} `}</Text>
+        <Button key={key} label={isOpen ? '▲' : '▼'} onPress={toggle} />
+      </Box>
+    )
+
+    // Closed, a block's title says how many it holds.
+    const monitorOpen = await read($, monitorOpenAtom)
     const monitor = (
       <Box flexDirection="column">
-        <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
-        <Text dimColor>Sub-agent Monitor</Text>
-        {running.length === 0 ? (
+        {rule}
+        {header(
+          monitorOpen ? 'Sub-agent Monitor' : `Sub-agent Monitor (${running.length})`,
+          'monitor-toggle',
+          monitorOpen,
+          () => update($, monitorOpenAtom, o => !o),
+        )}
+        {!monitorOpen ? null : running.length === 0 ? (
           <Text dimColor> - none</Text>
         ) : (
           running.map(m => {
@@ -572,16 +591,22 @@ export const register: Register = on => {
       </Box>
     )
 
-    const rule = <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
     // Event Message: the newest three events, each in a rounded frame, its
     // stamp (YYYYMMDD-hhmm) on the first row and its summary from the second.
-    const events = (await read($, eventsAtom)).slice(0, SHOWN_EVENTS)
+    const allEvents = await read($, eventsAtom)
+    const events = allEvents.slice(0, SHOWN_EVENTS)
+    const eventsOpen = await read($, eventsOpenAtom)
     const paneWidth = Math.max(8, (columns || OPEN.columns) - 1)
     const eventMessage = (
       <Box flexDirection="column">
         {rule}
-        <Text dimColor>Event Message</Text>
-        {events.length === 0 ? (
+        {header(
+          eventsOpen ? 'Event Message' : `Event Message (${allEvents.length})`,
+          'events-toggle',
+          eventsOpen,
+          () => update($, eventsOpenAtom, o => !o),
+        )}
+        {!eventsOpen ? null : events.length === 0 ? (
           <Text dimColor> - none</Text>
         ) : (
           events.map((ev, i) => (
@@ -652,14 +677,6 @@ export const register: Register = on => {
           bar('HP', v.hp, 10, BAR.hp)
         )}
         {cpRow}
-      </Box>
-    )
-
-    // A block's title and the button that opens or closes it.
-    const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
-      <Box flexDirection="row">
-        <Text dimColor>{`${title} `}</Text>
-        <Button key={key} label={isOpen ? '▲' : '▼'} onPress={toggle} />
       </Box>
     )
 
