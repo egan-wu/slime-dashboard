@@ -80,9 +80,15 @@ let minions: SlimeMinion[] = []
 let weather: SlimeWeather = DEFAULT_WEATHER
 let vitals: Vitals = FULL
 let waiting = false
-// The machine's UTC offset in minutes, from wttr.in's local time; until it is
-// read, event stamps use the plugin environment's own zone.
+// This computer's UTC offset in minutes, read from `date +%z` when the
+// session starts; until then (or where it cannot run) event stamps use the
+// plugin environment's own zone.
 let tzOffset: number | undefined
+
+async function readLocalZone($: EngineInterface) {
+  const run = await $.process.run(['date', '+%z']).catch(() => undefined)
+  if (run?.exitCode === 0) tzOffset = offsetOf(run.stdout) ?? tzOffset
+}
 // The tick the troop found its treasure chest on, while that scene plays.
 let partyAt: number | undefined
 // When each new little slime starts budding off the main one. They come out
@@ -212,7 +218,6 @@ async function refreshWeather($: EngineInterface): Promise<string> {
     const reply = await $.http.fetch(WEATHER_URL, { headers: { 'User-Agent': 'curl/8' } })
     const next = reply.ok ? parseWeather(reply.text) : undefined
     if (next) {
-      tzOffset = offsetOf(reply.text.split('|')[3] ?? '') ?? tzOffset
       weather = next
       await update($, weatherAtom, () => next)
       return `Weather: ${next.day ? 'day' : 'night'}, ${next.sky} (wttr.in said "${reply.text.trim()}").`
@@ -364,6 +369,7 @@ export const register: Register = on => {
     await refreshModel($)
     await refreshVitals($)
     void $.ui.open(OPEN)
+    void readLocalZone($)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
 

@@ -11,8 +11,8 @@ export const SHOWN_EVENTS = 3
 export const addEvent = (list: readonly SlimeEvent[], event: SlimeEvent): SlimeEvent[] =>
   [event, ...list].slice(0, KEEP_EVENTS)
 
-// The UTC offset in minutes of a time like `00:39:17+0800` (wttr.in's), so
-// stamps read in the machine's own time whatever zone the plugin runs in.
+// The UTC offset in minutes at the end of `+0800` (what `date +%z` prints),
+// so stamps read in this computer's own time whatever zone the plugin runs in.
 export function offsetOf(time: string): number | undefined {
   const m = time.trim().match(/([+-])(\d{2})(\d{2})$/)
   if (!m) return undefined
