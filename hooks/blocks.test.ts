@@ -330,8 +330,8 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
     const line = e.argv.join(' ')
     ran.push(line)
     return line.includes(failOn) && failOn !== ''
-      ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-subagent-dashboard" is not installed' } }
-      : { value: { exitCode: 0, stdout: 'ok', stderr: '' } }
+      ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-subagent-dashboard" is not installed', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 0, stdout: 'ok', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   let reloads = 0
   on('command.run', { command: 'reload-plugins' }, async () => {
