@@ -4,6 +4,7 @@ import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } f
 import { addEvent, offsetOf, stamp } from './events'
 import { ASK, frame, ROWS } from './scene'
 import { grouped, parseAdd, skillsFrom } from './skills'
+import { VERSION } from './version'
 
 const PLUGIN = 'slime-subagent-dashboard'
 const PANE = {
@@ -340,6 +341,8 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
   })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ key: 'update' })).toBeUndefined()
+  // The version shows at the foot, open or closed.
+  expect(await ui.find({ type: 'Text', text: `v${VERSION}` })).toBeDefined()
   await ui.press({ key: 'settings-toggle' })
   expect((await ui.find({ key: 'update' }))?.text).toBe('[Update]')
   expect(await ui.find({ type: 'Text', text: ': update dashboard' })).toBeDefined()

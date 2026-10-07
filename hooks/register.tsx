@@ -12,6 +12,7 @@ import type { Skill } from './skills'
 import { cleanSummary, wrapSummary } from './summary'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
+import { VERSION } from './version'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL } from './weather'
 import type { SlimeMinion, SlimeWeather } from '../types'
 
@@ -671,6 +672,10 @@ export const register: Register = on => {
             )}
           </Box>
         )}
+        {/* The version, at the pane's foot to the right, in a muted slate blue. */}
+        <Box flexDirection="row" justifyContent="flex-end" width={Math.max(8, (columns || OPEN.columns) - 1)}>
+          <Text color="#5f7186">{`v${VERSION}`}</Text>
+        </Box>
       </Box>
     )
 
