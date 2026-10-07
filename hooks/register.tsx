@@ -201,8 +201,12 @@ async function refreshVitals($: EngineInterface) {
   if (usage) await setVitals($, vitalsOf(usage.rateLimits, usage.context.percent))
 }
 
-// The bars' colors: HP red, MP blue, CP white.
-const BAR = { hp: '#e5383b', mp: '#3a86ff', cp: '#f0f0f0' }
+// The bars' colors: HP a bright red, MP a bright blue. CP is drawn in the
+// terminal's own text color, since it is a button and a button's label takes
+// no color of its own.
+const BAR = { hp: '#ff5c5c', mp: '#4db8ff' }
+// The word written across the middle of the CP bar: pressing the bar compacts.
+const UNLOAD = 'UNLOAD'
 
 async function setWaiting($: EngineInterface, value: boolean) {
   if (value === waiting) return
@@ -449,17 +453,43 @@ export const register: Register = on => {
 
     // HP and MP (a subscription) or HP alone (an API key or enterprise seat)
     // on the first row; CP and the button that compacts the context on the second.
+    const amount = (percent: number) => `] ${percent < 0 ? '—' : `${percent}%`}`
     const bar = (label: string, percent: number, cells: number, color: string) => {
       const filled = filledOf(percent, cells)
       return (
         <Text>
-          {`${label} [`}
+          <Text bold>{label}</Text>
+          {' ['}
           <Text color={color}>{'█'.repeat(filled)}</Text>
           <Text dimColor>{'░'.repeat(cells - filled)}</Text>
-          {`] ${percent < 0 ? '—' : `${percent}%`}`}
+          {amount(percent)}
         </Text>
       )
     }
+    // CP: the bar is the Unload button. UNLOAD is written across its middle;
+    // the filled part is one button drawn bright and the rest another drawn
+    // dim, so the word shows how full the window is, and pressing either half
+    // runs /compact.
+    const unload = () => $.command.run({ command: 'compact' })
+    const CP_CELLS = 10
+    const cpFilled = filledOf(v.cp, CP_CELLS)
+    const from = (CP_CELLS - UNLOAD.length) >> 1
+    const cpCells = Array.from({ length: CP_CELLS }, (_, i) =>
+      i >= from && i < from + UNLOAD.length ? UNLOAD[i - from]! : i < cpFilled ? '█' : '░',
+    )
+    const cpRow = (
+      <Box flexDirection="row">
+        <Text>
+          <Text bold>CP</Text>
+          {' ['}
+        </Text>
+        {cpFilled > 0 && <Button key="unload" label={cpCells.slice(0, cpFilled).join('')} plain onPress={unload} />}
+        {cpFilled < CP_CELLS && (
+          <Button key="unload-rest" label={cpCells.slice(cpFilled).join('')} plain dimColor onPress={unload} />
+        )}
+        <Text>{amount(v.cp)}</Text>
+      </Box>
+    )
     const stats = (
       <Box flexDirection="column">
         {v.plan === 'subscription' ? (
@@ -470,10 +500,7 @@ export const register: Register = on => {
         ) : (
           bar('HP', v.hp, 10, BAR.hp)
         )}
-        <Box flexDirection="row" gap={1}>
-          {bar('CP', v.cp, 10, BAR.cp)}
-          <Button key="unload" label="Unload" onPress={() => $.command.run({ command: 'compact' })} />
-        </Box>
+        {cpRow}
       </Box>
     )
 

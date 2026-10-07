@@ -70,3 +70,30 @@ test('the Skill Box sends a skill with the typed prompt, the Property block open
     await ui.unmount()
   }
 })
+
+test('the CP bar is the Unload button: either half runs /compact', async ($, on) => {
+  mock.store(on)
+  let compacts = 0
+  on('command.run', { command: 'compact' }, async () => {
+    compacts++
+    return { text: '' }
+  })
+  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { window: 200_000, tokens: 124_000, percent: 62 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 30 }, { kind: 'seven_day', percentUsed: 77 }],
+    changed: ['context', 'rateLimits'],
+  })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    for (const key of ['unload', 'unload-rest']) {
+      const half = await ui.find({ key })
+      expect(half).toBeDefined()
+    }
+    const text = `${(await ui.find({ key: 'unload' }))?.text}${(await ui.find({ key: 'unload-rest' }))?.text}`
+    expect(text).toContain('UNLOAD')
+    await ui.press({ key: 'unload-rest' })
+    await ui.unmount()
+  }
+  expect(compacts).toBe(2)
+})
