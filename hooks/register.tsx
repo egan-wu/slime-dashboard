@@ -50,6 +50,8 @@ const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as c
 const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
 // The main loop's reasoning effort as its last model request was sent ('' before one).
 const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
+// Whether the row of effort levels under Property's Effort is open.
+const effortOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effortOpen' } as const, false)
 // The last turn's length, and when the running one started (0: none runs).
 const lastTurnMsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'lastTurnMs' } as const, 0)
 const turnStartedAtAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'turnStartedAt' } as const, 0)
@@ -252,14 +254,20 @@ async function manageSkills($: EngineInterface, args: string): Promise<string | 
   return undefined
 }
 
-// Property's Effort button steps through the levels with /effort, round again after max.
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-const EFFORT_NAMES: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'xHigh', max: 'Max' }
-const effortName = (effort: string) => (effort === '' ? '—' : (EFFORT_NAMES[effort] ?? effort))
+// Property's Effort button opens a row of the levels, each short-named;
+// picking one runs /effort with it and closes the row.
+const EFFORTS = [
+  { level: 'low', name: 'Low', short: 'L' },
+  { level: 'medium', name: 'Medium', short: 'M' },
+  { level: 'high', name: 'High', short: 'H' },
+  { level: 'xhigh', name: 'xHigh', short: 'xH' },
+  { level: 'max', name: 'Max', short: 'Max' },
+]
+const effortName = (effort: string) =>
+  effort === '' ? '—' : (EFFORTS.find(e => e.level === effort)?.name ?? effort)
 
-async function nextEffort($: EngineInterface) {
-  const at = EFFORTS.indexOf((await read($, effortAtom)) as (typeof EFFORTS)[number])
-  const level = EFFORTS[(at + 1) % EFFORTS.length]!
+async function pickEffort($: EngineInterface, level: string) {
+  await update($, effortOpenAtom, () => false)
   await $.command.run({ command: 'effort', args: level })
   await update($, effortAtom, () => level)
 }
@@ -268,6 +276,11 @@ async function pickModel($: EngineInterface, id: string) {
   await $.command.run({ command: 'model', args: id })
   await refreshModel($)
 }
+
+// The hooks that only watch (a spawn, a tool call, /effort, a notification)
+// end in `.catch(($, e, next) => next(e))`: should one fail, what it watched
+// goes on as if it were not there, and runs once (`next(e)` replays a call
+// the hook had already made).
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -328,6 +341,15 @@ export const register: Register = on => {
     return { text: 'Slime subagent dashboard opened.' }
   })
 
+  // /effort typed at the prompt (or run by the row of levels): the button follows.
+  on('command.run', { command: 'effort' }, async ($, e, next) => {
+    const ran = await next(e)
+    const level = e.args.trim().toLowerCase()
+    if (EFFORTS.some(x => x.level === level)) await update($, effortAtom, () => level).catch(() => {})
+
+    return ran
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', async ($, e, next) => {
     await setBusy($, true)
     await setWaiting($, false)
@@ -351,7 +373,7 @@ export const register: Register = on => {
     }
 
     return result
-  })
+  }).catch(($, e, next) => next(e))
 
   // Each model request of the main loop's turn is one iteration; a new one
   // also means the person has answered whatever was asked.
@@ -374,13 +396,13 @@ export const register: Register = on => {
     await setWaiting($, false).catch(() => {})
 
     return ran
-  })
+  }).catch(($, e, next) => next(e))
 
   on('classic.Notification', async ($, e, next) => {
     if (ASKING_NOTICES.has(e.notification_type)) await setWaiting($, true).catch(() => {})
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     if (e.usage) await update($, tallyAtom, t => addUsage(t, e.usage!)).catch(() => {})
@@ -536,6 +558,7 @@ export const register: Register = on => {
     // Property: the session's figures, shown once opened.
     const propsOpen = await read($, propsOpenAtom)
     const effort = await read($, effortAtom)
+    const effortOpen = await read($, effortOpenAtom)
     const tally = await read($, tallyAtom)
     const iteration = await read($, iterationAtom)
     const startedAt = await read($, turnStartedAtAtom)
@@ -548,15 +571,34 @@ export const register: Register = on => {
         {header('Property', 'props-toggle', propsOpen, () => update($, propsOpenAtom, o => !o))}
         {propsOpen && (
           <Box flexDirection="column">
+            <Text>{` Model: ${info.name}`}</Text>
+            <Box flexDirection="row">
+              <Text>{' Effort: '}</Text>
+              <Button
+                key="effort"
+                label={`[${effortName(effort)}]`}
+                plain
+                onPress={() => update($, effortOpenAtom, o => !o)}
+              />
+            </Box>
+            {effortOpen && (
+              // The levels, the current one bright and the rest dim.
+              <Box flexDirection="row" marginLeft={1}>
+                {EFFORTS.map(x => (
+                  <Button
+                    key={`effort-${x.level}`}
+                    label={`[${x.short}]`}
+                    plain
+                    dimColor={x.level !== effort}
+                    onPress={() => pickEffort($, x.level)}
+                  />
+                ))}
+              </Box>
+            )}
             <Text>{` Cache Hit Rate: ${hit === undefined ? '—' : `${hit.toFixed(1)}%`}`}</Text>
             <Text>{` Token Usage: ${compact(totalTokens(tally))}`}</Text>
             <Text>{` Iteration Rate: ${iteration}/∞`}</Text>
             <Text>{` Latest Command: ${secondsText(timerMs)}`}</Text>
-            <Text>{` Model: ${info.name}`}</Text>
-            <Box flexDirection="row">
-              <Text>{' Effort: '}</Text>
-              <Button key="effort" label={`[${effortName(effort)}]`} plain onPress={() => nextEffort($)} />
-            </Box>
           </Box>
         )}
       </Box>

@@ -100,7 +100,7 @@ test('the CP bar is the Unload button: either half runs /compact', async ($, on)
   expect(compacts).toBe(2)
 })
 
-test('Property shows the model and an Effort button that steps through /effort', async ($, on) => {
+test('Property lists Model and Effort first; Effort opens a row of levels to pick from', async ($, on) => {
   mock.store(on)
   const efforts: string[] = []
   on('command.run', { command: 'effort' }, async (_$, e) => {
@@ -110,12 +110,26 @@ test('Property shows the model and an Effort button that steps through /effort',
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'props-toggle' })
-    expect(await ui.find({ type: 'Text', text: /Model: / })).toBeDefined()
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const at = (pattern: RegExp) => texts.findIndex(t => pattern.test(t ?? ''))
+    expect(at(/Model: /)).toBeLessThan(at(/Effort: /))
+    expect(at(/Effort: /)).toBeLessThan(at(/Cache Hit Rate/))
+
+    expect(await ui.find({ key: 'effort-high' })).toBeUndefined()
     await ui.press({ key: 'effort' })
-    // Unread, it starts at Low; the second surface's press steps on to Medium.
-    expect((await ui.find({ key: 'effort' }))?.text).toBe(surface === 'terminal' ? '[Low]' : '[Medium]')
+    expect((await ui.find({ key: 'effort-xhigh' }))?.text).toBe('[xH]')
+    await ui.press({ key: 'effort-high' })
+    expect(await ui.find({ key: 'effort-high' })).toBeUndefined()
+    expect((await ui.find({ key: 'effort' }))?.text).toBe('[High]')
     await ui.press({ key: 'props-toggle' })
     await ui.unmount()
   }
-  expect(efforts).toEqual(['low', 'medium'])
+  expect(efforts).toEqual(['high', 'high'])
+
+  // /effort typed at the prompt moves the button too.
+  await $.command.run({ command: 'effort', args: 'xhigh', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'props-toggle' })
+  expect((await ui.find({ key: 'effort' }))?.text).toBe('[xHigh]')
+  await ui.unmount()
 })

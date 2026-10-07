@@ -23,6 +23,7 @@ declare module 'claude-code' {
       lastTurnMs: number
       turnStartedAt: number
       effort: string
+      effortOpen: boolean
     }
   }
 }
