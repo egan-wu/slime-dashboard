@@ -53,15 +53,17 @@ type Sprite = { rows: string[]; colors: Record<string, number> }
 
 // H is the glossy highlight, E the eyes, D the shaded rim. Asleep, the eyes
 // are drawn over the body as '-' characters (see SLEEP_EYES).
+// M, to the right of, below and below-right of the highlight, is a softer
+// gloss between the highlight and the body, so the shine spreads.
 const SLIME = {
-  awake: ['.BHBB.', 'DEBBED', 'DBBBBD'],
+  awake: ['.BHMB.', 'DEMMED', 'DBBBBD'],
   // The crawl's other frame: a 2px tuft pops up on the crown, so the head
   // flickers as it goes.
-  crawl: ['..BB..', '.BHBB.', 'DEBBED', 'DBBBBD'],
+  crawl: ['..BB..', '.BHMB.', 'DEMMED', 'DBBBBD'],
   // Off the ground the tuft stays up and the underside rounds out; both
   // settle again on landing.
-  air: ['..BB..', '.BHBB.', 'DEBBED', 'DBBBBD', '.DDDD.'],
-  sleep: ['.BHBB.', 'DBBBBD', 'DBBBBD'],
+  air: ['..BB..', '.BHMB.', 'DEMMED', 'DBBBBD', '.DDDD.'],
+  sleep: ['.BHMB.', 'DBMMBD', 'DBBBBD'],
 }
 // A subagent's little slime, trailing the main one: a 2x2 ball in the air
 // that flattens on landing and springs back.
@@ -307,9 +309,13 @@ const ZZZ = [
   { dx: 4, ch: 'z' },
 ]
 
+// Halfway from one color to another, channel by channel.
+const between = (a: number, b: number) =>
+  [16, 8, 0].reduce((c, shift) => c | (Math.round((((a >> shift) & 0xff) + ((b >> shift) & 0xff)) / 2) << shift), 0)
+
 const tintOf = (model: string) => {
   const info = modelInfo(model)
-  return { B: info.body, H: info.light, D: info.dark, E: 0x101018 }
+  return { B: info.body, H: info.light, M: between(info.light, info.body), D: info.dark, E: 0x101018 }
 }
 
 // A little slime in the troop: its subagent's model; while it is still
