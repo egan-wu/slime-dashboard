@@ -45,7 +45,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 At a Claude Code prompt in a terminal:
 
 ```
-/plugin install slime-dashboard --marketplace egan-wu/slime-subagent-dashboard-claude-code-mod
+/plugin install slime-dashboard --marketplace egan-wu/slime-dashboard
 ```
 
 Answer `y` to add the marketplace, then pick a scope. The pane opens by itself when the terminal is 144 columns wide or more; in a narrower terminal, or after closing it, type `/slime-dashboard` to open it. It docks on the right only in Claude Code's fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`, 110 columns or more); otherwise it sits above the prompt.
