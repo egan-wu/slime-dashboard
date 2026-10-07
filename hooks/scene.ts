@@ -284,19 +284,22 @@ const SLEEP_EYES = [1, 4]
 // The awake face's two eye characters, left then right, and the vein's color.
 const FACE_EYES = { x: ['x', 'x'], '><': ['>', '<'], TT: ['T', 'T'] } as const
 const VEIN = 0xff6b6b
-// Waiting on the person: a speech bubble over the main slime holding a
-// question mark, its tail pointing down at the slime's head. It fills the
-// sky above the slime and flashes between yellow and white.
+// Waiting on the person: a small speech bubble over the main slime, its
+// tail on the slime's head. The bold question mark inside is not drawn here
+// (a Raster cell has no bold): the pane lays it over the bubble's middle cell,
+// BUBBLE_CELL, as text. The bubble flashes yellow and white every half second.
 const BUBBLE = [
-  '.BBBBB.',
-  'BBQQQBB',
-  'BBBBQBB',
-  'BBBQQBB',
-  'BBBBBBB',
-  'BBBQBBB',
-  '.BBBBB.',
-  '...BB..',
+  '.BBB.',
+  'BBBBB',
+  'BBBBB',
+  '.BBB.',
+  '..B..',
 ]
+// Where the question mark goes: the cell row and column of the bubble's
+// middle, for a main slime standing at home (where it waits) in a scene
+// `columns` wide. The bubble's rows 1 and 2 are the scene's pixel rows 4 and 5.
+export const bubbleCell = (columns: number) => ({ row: 2, col: homeCx(columns) })
+export const bubbleFill = (tick: number) => (Math.floor(tick / 5) % 2 === 0 ? ASK.yellow : ASK.white)
 export const ASK = { yellow: 0xffd23f, white: 0xffffff, mark: 0x101018 }
 const ZZZ = [
   { dx: 2, ch: 'z' },
@@ -541,12 +544,8 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
-    // The bubble's tail rests on the head (the bubble takes the whole sky
-    // above it, rows 0 to 7); it flashes every four ticks.
-    if (face.ask) {
-      const fill = Math.floor(tick / 4) % 2 === 0 ? ASK.yellow : ASK.white
-      draw({ rows: BUBBLE, colors: { B: fill, Q: ASK.mark } }, cx - (BUBBLE[0]!.length >> 1), top - 1)
-    }
+    // The bubble's tail rests on the head.
+    if (face.ask) draw({ rows: BUBBLE, colors: { B: bubbleFill(tick) } }, cx - (BUBBLE[0]!.length >> 1), top - 1)
   } else {
     const rows = SLIME.sleep
     const left = cx - (rows[0]!.length >> 1)

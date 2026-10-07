@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
-import { EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
+import { ASK, bubbleCell, bubbleFill, EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
 import type { Offsets } from './scene'
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import type { Tally } from './props'
@@ -361,7 +361,8 @@ export const register: Register = on => {
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
       // The latest-command timer counts while a turn runs.
-      if (busy && tick % 5 === 0) $.ui.invalidate('ui.render')
+      // So does the bubble's question mark, which flashes with the bubble.
+      if ((busy || waiting) && tick % 5 === 0) $.ui.invalidate('ui.render')
     })
 
     return next(e)
@@ -731,7 +732,17 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {stats}
-          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting })} />
+          <Box flexDirection="column">
+            <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting })} />
+            {isWaiting && (
+              // The bubble's question mark, bold, laid over its middle cell.
+              <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>
+                <Text bold color={hex(ASK.mark)} backgroundColor={hex(bubbleFill(tick))}>
+                  ?
+                </Text>
+              </Box>
+            )}
+          </Box>
           {picker}
           {property}
           {skillBox}

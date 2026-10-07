@@ -30,7 +30,7 @@ test('cache hit rate and accumulated tokens add up over turns', async () => {
   expect(secondsText(12_440)).toBe('12.4s')
 })
 
-test('waiting on the person: a flashing speech bubble with a question mark over the main slime', async () => {
+test('waiting on the person: a small flashing bubble, a bold question mark laid over it', async ($, on) => {
   // Every pixel color the scene drew, top and bottom half of each cell.
   const colors = (tick: number, ask: boolean) => {
     const cells = frame(30, { cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 }, tick, true, 'claude-opus-5-5', [], { day: false, sky: 'cloudy' }, undefined, { ask })
@@ -40,13 +40,19 @@ test('waiting on the person: a flashing speech bubble with a question mark over 
     return seen
   }
   const count = (seen: number[], color: number) => seen.filter(c => c === color).length
-  // A big bubble: dozens of yellow pixels, the dark question mark inside it.
-  expect(count(colors(0, true), ASK.yellow)).toBeGreaterThan(30)
-  expect(count(colors(0, true), ASK.mark)).toBeGreaterThan(count(colors(0, false), ASK.mark))
-  // Four ticks later it flashes white, and without a question it is not there.
-  expect(count(colors(4, true), ASK.yellow)).toBe(0)
-  expect(count(colors(4, true), ASK.white)).toBeGreaterThan(30)
+  // A small bubble: 5 by 5 less its corners, 17 pixels; white half a second later.
+  expect(count(colors(0, true), ASK.yellow)).toBe(17)
+  expect(count(colors(5, true), ASK.white)).toBe(17)
   expect(count(colors(0, false), ASK.yellow)).toBe(0)
+
+  // In the pane, while a permission prompt waits: the bold ? over the bubble.
+  mock.store(on)
+  on('classic.Notification', async () => ({}))
+  await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const mark = await ui.find({ type: 'Text', text: '?' })
+  expect(mark?.props).toMatchObject({ bold: true })
+  await ui.unmount()
 })
 
 test('the Skill Box sends a skill with the typed prompt, the Property block opens', async ($, on) => {
