@@ -4,6 +4,8 @@ import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 import { EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
 import type { Offsets } from './scene'
 import { cleanSummary, wrapSummary } from './summary'
+import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
+import type { Vitals } from './vitals'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL } from './weather'
 import type { SlimeMinion, SlimeWeather } from '../types'
 
@@ -28,8 +30,8 @@ const busyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'busy' } as con
 const modelAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'model' } as const, '')
 const minionsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'minions' } as const, [] as SlimeMinion[])
 const weatherAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'weather' } as const, DEFAULT_WEATHER as SlimeWeather)
-// The context window's fill as a whole percentage; -1 before the first reading.
-const contextAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'context' } as const, -1)
+// HP, MP and CP: what is left of the usage limits, and the context window's fill.
+const vitalsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'vitals' } as const, FULL as Vitals)
 
 // Animation lives in the module: a reload restarts the walk, the state stays.
 let busy = false
@@ -38,7 +40,7 @@ let tick = 0
 let columns = 0
 let minions: SlimeMinion[] = []
 let weather: SlimeWeather = DEFAULT_WEATHER
-let context = -1
+let vitals: Vitals = FULL
 // The tick the troop found its treasure chest on, while that scene plays.
 let partyAt: number | undefined
 // When each new little slime starts budding off the main one. They come out
@@ -160,27 +162,20 @@ async function refreshModel($: EngineInterface) {
   await update($, modelAtom, () => current)
 }
 
-// The status line's figure: the last response's input against the window.
-// A failed read keeps the gauge as it was.
-async function refreshContext($: EngineInterface) {
-  const usage = await $.session.usage().catch(() => undefined)
-  const percent = usage?.context.percent ?? context
-  if (percent === context) return
-  context = percent
-  await update($, contextAtom, () => percent)
+async function setVitals($: EngineInterface, next: Vitals) {
+  if (next.plan === vitals.plan && next.hp === vitals.hp && next.mp === vitals.mp && next.cp === vitals.cp) return
+  vitals = next
+  await update($, vitalsAtom, () => next)
 }
 
-// Ten cells, filled from white to dark as the window fills.
-const GAUGE_FROM = 0xf5f5f5
-const GAUGE_TO = 0x3a3a3a
-function gaugeColor(i: number) {
-  const mix = (shift: number) => {
-    const a = (GAUGE_FROM >> shift) & 0xff
-    const b = (GAUGE_TO >> shift) & 0xff
-    return Math.round(a + ((b - a) * i) / 9) << shift
-  }
-  return hex(mix(16) | mix(8) | mix(0))
+// The status line's figures. A failed read keeps the bars as they were.
+async function refreshVitals($: EngineInterface) {
+  const usage = await $.session.usage().catch(() => undefined)
+  if (usage) await setVitals($, vitalsOf(usage.rateLimits, usage.context.percent))
 }
+
+// The bars' colors: HP red, MP blue, CP white.
+const BAR = { hp: '#e5383b', mp: '#3a86ff', cp: '#f0f0f0' }
 
 async function pickModel($: EngineInterface, id: string) {
   await $.command.run({ command: 'model', args: id })
@@ -195,9 +190,9 @@ export const register: Register = on => {
     minions = (await read($, minionsAtom)).filter(m => !m.done)
     await update($, minionsAtom, () => minions)
     weather = await read($, weatherAtom)
-    context = await read($, contextAtom)
+    vitals = await read($, vitalsAtom)
     await refreshModel($)
-    await refreshContext($)
+    await refreshVitals($)
     void $.ui.open(OPEN)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
@@ -208,16 +203,19 @@ export const register: Register = on => {
       const inLine = minions.filter(m => !m.done || m.id === stayer).length
       if (party !== undefined && party >= partyLength(columns || OPEN.columns, inLine)) await endParty($)
       const t = partyTick()
-      step(off, t === undefined ? moving(busy, minions) : partyScrolling(columns || OPEN.columns, t, inLine))
+      // Down, the troop holds still until a limit resets.
+      const going = moving(busy, minions) && !isDown(vitals)
+      step(off, t === undefined ? going : partyScrolling(columns || OPEN.columns, t, inLine))
       closeRanks()
       await dropGone($)
       if (tick % 20 === 0) {
         await refreshModel($)
-        await refreshContext($)
+        await refreshVitals($)
       }
       if (tick % 10 === 5) await checkMinions($)
       if (columns > 0) {
-        const cells = frame(columns, off, tick, moving(busy, minions), model, followersOf(minions), weather, t)
+        const walking = moving(busy, minions)
+        const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, faceOf(vitals, walking))
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
     })
@@ -255,8 +253,15 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       await setBusy($, false)
-      await refreshContext($)
+      await refreshVitals($)
     }
+
+    return next(e)
+  })
+
+  // The usage figures moved: the bars follow at once.
+  on('session.measure', async ($, e, next) => {
+    await setVitals($, vitalsOf(e.rateLimits, e.context.percent)).catch(() => {})
 
     return next(e)
   })
@@ -266,6 +271,7 @@ export const register: Register = on => {
     const followers = await read($, minionsAtom)
     const sky = await read($, weatherAtom)
     const isBusy = moving(await read($, busyAtom), followers)
+    const v = await read($, vitalsAtom)
     const info = modelInfo(current)
     const status = isBusy ? '▸' : 'z'
 
@@ -320,19 +326,33 @@ export const register: Register = on => {
       </Box>
     )
 
-    // How full the context window is, as its own section under the monitor.
-    const percent = await read($, contextAtom)
-    const filled = percent < 0 ? 0 : Math.min(10, Math.round(percent / 10))
-    const contextWindow = (
-      <Box flexDirection="column">
-        <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
+    // HP and MP (a subscription) or HP alone (an API key or enterprise seat)
+    // on the first row; CP and the button that compacts the context on the second.
+    const bar = (label: string, percent: number, cells: number, color: string) => {
+      const filled = filledOf(percent, cells)
+      return (
         <Text>
-          {'Context Window: ['}
-          {Array.from({ length: 10 }, (_, i) =>
-            i < filled ? <Text color={gaugeColor(i)}>█</Text> : <Text dimColor>░</Text>,
-          )}
+          {`${label} [`}
+          <Text color={color}>{'█'.repeat(filled)}</Text>
+          <Text dimColor>{'░'.repeat(cells - filled)}</Text>
           {`] ${percent < 0 ? '—' : `${percent}%`}`}
         </Text>
+      )
+    }
+    const stats = (
+      <Box flexDirection="column">
+        {v.plan === 'subscription' ? (
+          <Box flexDirection="row" gap={1}>
+            {bar('HP', v.hp, 5, BAR.hp)}
+            {bar('MP', v.mp, 5, BAR.mp)}
+          </Box>
+        ) : (
+          bar('HP', v.hp, 10, BAR.hp)
+        )}
+        <Box flexDirection="row" gap={1}>
+          {bar('CP', v.cp, 10, BAR.cp)}
+          <Button key="unload" label="Unload" onPress={() => $.command.run({ command: 'compact' })} />
+        </Box>
       </Box>
     )
 
@@ -350,20 +370,20 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
-          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick())} />
+          {stats}
+          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), faceOf(v, isBusy))} />
           {picker}
           {monitor}
-          {contextWindow}
         </Box>
       )
     }
 
     return (
       <Box flexDirection="column">
+        {stats}
         {line}
         {picker}
         {monitor}
-        {contextWindow}
       </Box>
     )
   })

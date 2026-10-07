@@ -8,6 +8,7 @@ const SKY = 0x01000000
 
 import { DEFAULT_WEATHER } from './weather'
 import type { Weather } from './weather'
+import type { Face } from './vitals'
 
 export type Layer = 'cloud' | 'bird' | 'tree' | 'rock' | 'ground'
 export type Offsets = Record<Layer, number>
@@ -280,6 +281,9 @@ type Overlay = { col: number; row: number; ch: string; fg: number; bg?: number }
 // row is the cell's top half, '_' (drawn at the cell's foot) when it is the
 // bottom, so the line always sits just under the middle row.
 const SLEEP_EYES = [1, 4]
+// The awake face's two eye characters, left then right, and the vein's color.
+const FACE_EYES = { x: ['x', 'x'], '><': ['>', '<'], TT: ['T', 'T'] } as const
+const VEIN = 0xff6b6b
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -326,6 +330,8 @@ export function frame(
   weather: Weather = DEFAULT_WEATHER,
   // Ticks since the troop found its treasure chest; undefined on a normal day.
   party?: number,
+  // How the main slime is holding up (vitals.ts): down, or straining under a full context.
+  face: Face = {},
 ): string {
   const w = Math.max(1, Math.min(512, columns))
   const inLine = minions.filter(f => typeof f === 'string' || f.leave === undefined).length
@@ -333,8 +339,9 @@ export function frame(
   // The main slime keeps to the right so its followers have room behind it.
   const cx = fete?.cx ?? Math.max(6, w - 8)
   // During the find the troop is wide awake whatever the session is doing.
-  const awake = busy || fete !== undefined
-  const travelling = fete ? fete.scrolling : busy
+  // Down, it stands still and wide awake: nothing passes until a limit resets.
+  const awake = busy || fete !== undefined || face.down === true
+  const travelling = fete ? fete.scrolling : busy && !face.down
   const px = new Uint32Array(w * PX_H).fill(SKY)
   const put = (x: number, y: number, color: number) => {
     if (x >= 0 && x < w && y >= 0 && y < PX_H) px[y * w + x] = color
@@ -494,8 +501,29 @@ export function frame(
     const width = SLIME.awake[0]!.length
     const left = cx - (width >> 1)
     const lift = rockLift(left, width, rocks)
-    const rows = lift > 0 ? SLIME.air : Math.floor(tick / 2) % 2 === 0 ? SLIME.awake : SLIME.crawl
-    draw({ rows, colors: tint }, left, GROUND_Y - 1 - lift)
+    const rows = face.down
+      ? SLIME.awake
+      : lift > 0
+        ? SLIME.air
+        : Math.floor(tick / 2) % 2 === 0
+          ? SLIME.awake
+          : SLIME.crawl
+    const bottom = GROUND_Y - 1 - lift
+    draw({ rows, colors: tint }, left, bottom)
+    // The face goes over the eyes as characters, as the sleeping eyes do: a
+    // cell holds the eye pixel and the body pixel beside it, so the
+    // character sits on the body's color.
+    const top = bottom - rows.length + 1
+    if (face.eyes) {
+      const eyeY = top + rows.findIndex(row => row.includes('E'))
+      const eyeRow = rows.find(row => row.includes('E'))!
+      const [l, r] = FACE_EYES[face.eyes]
+      const cols = [...eyeRow].flatMap((ch, dx) => (ch === 'E' ? [dx] : []))
+      cols.forEach((dx, i) =>
+        overlays.push({ col: left + dx, row: eyeY >> 1, ch: i === 0 ? l : r, fg: 0x101018, bg: info.body }),
+      )
+    }
+    if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
   } else {
     const rows = SLIME.sleep
     const left = cx - (rows[0]!.length >> 1)
