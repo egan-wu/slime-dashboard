@@ -453,7 +453,9 @@ export const register: Register = on => {
 
     // HP and MP (a subscription) or HP alone (an API key or enterprise seat)
     // on the first row; CP and the button that compacts the context on the second.
-    const amount = (percent: number) => `] ${percent < 0 ? '—' : `${percent}%`}`
+    // The percentage always takes four columns (`5%  `, `100%`), so the bars'
+    // closing brackets stand in the same columns whatever the numbers.
+    const amount = (percent: number) => `] ${(percent < 0 ? '—' : `${percent}%`).padEnd(4)}`
     const bar = (label: string, percent: number, cells: number, color: string) => {
       const filled = filledOf(percent, cells)
       return (
@@ -471,7 +473,10 @@ export const register: Register = on => {
     // dim, so the word shows how full the window is, and pressing either half
     // runs /compact.
     const unload = () => $.command.run({ command: 'compact' })
-    const CP_CELLS = 10
+    // CP's closing bracket lines up with the one above it: HP's on an API key
+    // (both ten cells), MP's on a subscription, past HP's 5-cell bar and
+    // percentage (`HP [` 4 + 5 + `] ` 2 + 4, a space, `MP [` 4 + 5, less `CP [`).
+    const CP_CELLS = v.plan === 'subscription' ? 4 + 5 + 2 + 4 + 1 + 4 + 5 - 4 : 10
     const cpFilled = filledOf(v.cp, CP_CELLS)
     const from = (CP_CELLS - UNLOAD.length) >> 1
     const cpCells = Array.from({ length: CP_CELLS }, (_, i) =>

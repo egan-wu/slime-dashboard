@@ -92,6 +92,8 @@ test('the CP bar is the Unload button: either half runs /compact', async ($, on)
     }
     const text = `${(await ui.find({ key: 'unload' }))?.text}${(await ui.find({ key: 'unload-rest' }))?.text}`
     expect(text).toContain('UNLOAD')
+    // CP's bracket stands under MP's: both bars end in the same column.
+    if (surface === 'terminal') expect(text.length).toBe(21)
     await ui.press({ key: 'unload-rest' })
     await ui.unmount()
   }
