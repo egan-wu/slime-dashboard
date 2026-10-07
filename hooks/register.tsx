@@ -16,7 +16,7 @@ import { VERSION } from './version'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL } from './weather'
 import type { SlimeMinion, SlimeWeather } from '../types'
 
-const PANE = 'slime-subagent-dashboard'
+const PANE = 'slime-dashboard'
 const SCENE = 'scene'
 const TICK_MS = 100
 // The sky is read every quarter hour, so day turns to night close to sunset;
@@ -36,45 +36,45 @@ const PICKS = [
   { label: 'Fable', id: 'fable' },
 ]
 
-const busyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'busy' } as const, false)
-const modelAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'model' } as const, '')
-const minionsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'minions' } as const, [] as SlimeMinion[])
-const weatherAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'weather' } as const, DEFAULT_WEATHER as SlimeWeather)
+const busyAtom = atom({ plugin: 'slime-dashboard', key: 'busy' } as const, false)
+const modelAtom = atom({ plugin: 'slime-dashboard', key: 'model' } as const, '')
+const minionsAtom = atom({ plugin: 'slime-dashboard', key: 'minions' } as const, [] as SlimeMinion[])
+const weatherAtom = atom({ plugin: 'slime-dashboard', key: 'weather' } as const, DEFAULT_WEATHER as SlimeWeather)
 // HP, MP and CP: what is left of the usage limits, and the context window's fill.
-const vitalsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'vitals' } as const, FULL as Vitals)
+const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
 // True while the session waits on the person: a permission prompt or a question.
-const waitingAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'waiting' } as const, false)
-// The Skill Box: the skills registered with /slime-subagent-dashboard add (kept
+const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const, false)
+// The Skill Box: the skills registered with /slime-dashboard add (kept
 // in the store across sessions), whether it is open, the prompt typed for
 // them, and the first of the five rows shown.
-const skillsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skills' } as const, [] as Skill[])
-const skillsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillsOpen' } as const, false)
-const skillPromptAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillPrompt' } as const, '')
+const skillsAtom = atom({ plugin: 'slime-dashboard', key: 'skills' } as const, [] as Skill[])
+const skillsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'skillsOpen' } as const, false)
+const skillPromptAtom = atom({ plugin: 'slime-dashboard', key: 'skillPrompt' } as const, '')
 // Per category: the first of its five rows shown, and whether it is closed
 // (a category is open until closed).
-const skillTopsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillTops' } as const, {} as Record<string, number>)
-const skillCatsClosedAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
+const skillTopsAtom = atom({ plugin: 'slime-dashboard', key: 'skillTops' } as const, {} as Record<string, number>)
+const skillCatsClosedAtom = atom({ plugin: 'slime-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
-const propsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'propsOpen' } as const, false)
+const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as const, false)
 // The Setting block: open or not, and what the last Update said ('' before one).
-const settingsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'settingsOpen' } as const, false)
-const updateStatusAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'updateStatus' } as const, '')
-const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
+const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' } as const, false)
+const updateStatusAtom = atom({ plugin: 'slime-dashboard', key: 'updateStatus' } as const, '')
+const tallyAtom = atom({ plugin: 'slime-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
 // The model requests of the main loop's current (or last) turn.
-const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
+const iterationAtom = atom({ plugin: 'slime-dashboard', key: 'iteration' } as const, 0)
 // The main loop's reasoning effort as its last model request was sent ('' before one).
-const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
+const effortAtom = atom({ plugin: 'slime-dashboard', key: 'effort' } as const, '')
 // The Event Message block's events, newest first.
-const eventsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'events' } as const, [] as SlimeEvent[])
+const eventsAtom = atom({ plugin: 'slime-dashboard', key: 'events' } as const, [] as SlimeEvent[])
 // Whether Sub-agent Monitor and Event Message are open; both start open.
-const monitorOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'monitorOpen' } as const, true)
-const eventsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'eventsOpen' } as const, true)
+const monitorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'monitorOpen' } as const, true)
+const eventsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'eventsOpen' } as const, true)
 // Whether the row of effort levels under Property's Effort is open.
-const modelOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'modelOpen' } as const, false)
-const effortOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effortOpen' } as const, false)
+const modelOpenAtom = atom({ plugin: 'slime-dashboard', key: 'modelOpen' } as const, false)
+const effortOpenAtom = atom({ plugin: 'slime-dashboard', key: 'effortOpen' } as const, false)
 // The last turn's length, and when the running one started (0: none runs).
-const lastTurnMsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'lastTurnMs' } as const, 0)
-const turnStartedAtAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'turnStartedAt' } as const, 0)
+const lastTurnMsAtom = atom({ plugin: 'slime-dashboard', key: 'lastTurnMs' } as const, 0)
+const turnStartedAtAtom = atom({ plugin: 'slime-dashboard', key: 'turnStartedAt' } as const, 0)
 
 const SKILL_ROWS = 5
 const SKILLS_KEY = 'skills'
@@ -221,7 +221,7 @@ async function dropGone($: EngineInterface) {
 
 // Is it day or night where this machine is, and what is the sky doing. A
 // failed or unreadable reply keeps the sky as it was and tries again soon.
-// Answers what it read, or why it read nothing, for `/slime-subagent-dashboard weather`.
+// Answers what it read, or why it read nothing, for `/slime-dashboard weather`.
 let retryPending = false
 async function refreshWeather($: EngineInterface): Promise<string> {
   let why: string
@@ -325,8 +325,8 @@ async function runSkill($: EngineInterface, skill: Skill) {
 // installed plugin to its latest commit, then reload plugins so this session
 // runs it. It updates an install (`/plugin install`); a copy loaded from a
 // folder (--plugin-dir, a mods folder) is not one, and says so.
-const PLUGIN_ID = 'slime-subagent-dashboard@slime-subagent-dashboard'
-const MARKETPLACE = 'slime-subagent-dashboard'
+const PLUGIN_ID = 'slime-dashboard@slime-dashboard'
+const MARKETPLACE = 'slime-dashboard'
 const lastLine = (text: string) => text.trim().split('\n').filter(Boolean).pop() ?? ''
 
 async function updatePlugin($: EngineInterface) {
@@ -357,7 +357,7 @@ async function updatePlugin($: EngineInterface) {
 }
 
 const USAGE =
-  'Usage: /slime-subagent-dashboard [add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]'
+  'Usage: /slime-dashboard [add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]'
 
 // `add <skill> [--category <name>] [--desc <words>]`, `remove <skill>`,
 // `list`, `weather`, or nothing to open the pane. Adding a skill again files
@@ -416,8 +416,8 @@ async function pickModel($: EngineInterface, id: string) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
-      name: 'slime-subagent-dashboard',
-      description: 'Open the slime subagent dashboard pane, or manage its Skill Box',
+      name: 'slime-dashboard',
+      description: 'Open the slime dashboard pane, or manage its Skill Box',
       argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]',
     })
     const kept = await $.store.get(SKILLS_KEY)
@@ -467,12 +467,12 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'slime-subagent-dashboard' }, async ($, e) => {
+  on('command.run', { command: 'slime-dashboard' }, async ($, e) => {
     const said = await manageSkills($, e.args)
     if (said !== undefined) return { text: said }
     await $.ui.open(OPEN)
 
-    return { text: 'Slime subagent dashboard opened.' }
+    return { text: 'Slime dashboard opened.' }
   })
 
   // /effort typed at the prompt (or run by the row of levels): the button follows.

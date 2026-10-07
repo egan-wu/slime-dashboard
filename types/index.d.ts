@@ -14,7 +14,7 @@ export type SlimeWeather = { day: boolean; sky: 'clear' | 'partly' | 'cloudy' | 
 
 declare module 'claude-code' {
   interface PluginState {
-    'slime-subagent-dashboard': {
+    'slime-dashboard': {
       busy: boolean; model: SlimeModel; minions: SlimeMinion[]; weather: SlimeWeather; vitals: SlimeVitals
       waiting: boolean
       skills: SlimeSkill[]

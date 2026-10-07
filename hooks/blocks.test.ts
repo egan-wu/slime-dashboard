@@ -6,7 +6,7 @@ import { ASK, frame, ROWS } from './scene'
 import { grouped, parseAdd, skillsFrom } from './skills'
 import { VERSION } from './version'
 
-const PLUGIN = 'slime-subagent-dashboard'
+const PLUGIN = 'slime-dashboard'
 const PANE = {
   plugin: PLUGIN,
   component: 'Pane' as const,
@@ -172,7 +172,7 @@ test('Property lists Model and Effort first; Effort opens a row of levels to pic
   await ui.unmount()
 })
 
-test('/slime-subagent-dashboard weather reads the sky now, and says why when it cannot', async ($, on) => {
+test('/slime-dashboard weather reads the sky now, and says why when it cannot', async ($, on) => {
   mock.store(on)
   mock.clock(on)
   let reply: { status: number; ok: boolean; text: string } | Error = { status: 200, ok: true, text: 'mmm|05:50:42|17:38:27|00:39:17+0800' }
@@ -331,7 +331,7 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
     const line = e.argv.join(' ')
     ran.push(line)
     return line.includes(failOn) && failOn !== ''
-      ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-subagent-dashboard" is not installed', isStdoutTruncated: false, isStderrTruncated: false } }
+      ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-dashboard" is not installed', isStdoutTruncated: false, isStderrTruncated: false } }
       : { value: { exitCode: 0, stdout: 'ok', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   let reloads = 0
@@ -349,8 +349,8 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
 
   await ui.press({ key: 'update' })
   expect(ran).toEqual([
-    'claude plugin marketplace update slime-subagent-dashboard',
-    'claude plugin update slime-subagent-dashboard@slime-subagent-dashboard',
+    'claude plugin marketplace update slime-dashboard',
+    'claude plugin update slime-dashboard@slime-dashboard',
   ])
   expect(reloads).toBe(1)
   expect(await ui.find({ type: 'Text', text: /Updated: reloading plugins/ })).toBeDefined()
@@ -358,6 +358,6 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
   failOn = 'plugin update'
   await ui.press({ key: 'update' })
   expect(reloads).toBe(1)
-  expect(await ui.find({ type: 'Text', text: /Update failed to update the plugin: Plugin "slime-subagent-dashboard" is not installed/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Update failed to update the plugin: Plugin "slime-dashboard" is not installed/ })).toBeDefined()
   await ui.unmount()
 })
