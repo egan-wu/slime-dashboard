@@ -1,0 +1,5 @@
+{
+  "name": "slime-subagent-dashboard",
+  "owner": { "name": "egan-wu" },
+  "plugins": [{ "name": "slime-subagent-dashboard", "source": "./" }]
+}
