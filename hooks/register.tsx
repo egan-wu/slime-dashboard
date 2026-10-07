@@ -55,6 +55,9 @@ const skillTopsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillTops
 const skillCatsClosedAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
 const propsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'propsOpen' } as const, false)
+// The Setting block: open or not, and what the last Update said ('' before one).
+const settingsOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'settingsOpen' } as const, false)
+const updateStatusAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'updateStatus' } as const, '')
 const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
 // The model requests of the main loop's current (or last) turn.
 const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
@@ -314,6 +317,41 @@ async function runSkill($: EngineInterface, skill: Skill) {
     const why = error instanceof Error ? error.message : String(error)
     $.ui.toast(`Skill Box: ${typed} did not run: ${why}`)
     await logEvent($, `Skill did not run: ${typed}`)
+  }
+}
+
+// Setting's Update: refresh this plugin's marketplace from GitHub, update the
+// installed plugin to its latest commit, then reload plugins so this session
+// runs it. It updates an install (`/plugin install`); a copy loaded from a
+// folder (--plugin-dir, a mods folder) is not one, and says so.
+const PLUGIN_ID = 'slime-subagent-dashboard@slime-subagent-dashboard'
+const MARKETPLACE = 'slime-subagent-dashboard'
+const lastLine = (text: string) => text.trim().split('\n').filter(Boolean).pop() ?? ''
+
+async function updatePlugin($: EngineInterface) {
+  const say = (text: string) => update($, updateStatusAtom, () => text)
+  await say('Updating: fetching the latest from GitHub…')
+  try {
+    const steps: [string, string[]][] = [
+      ['refresh the marketplace', ['claude', 'plugin', 'marketplace', 'update', MARKETPLACE]],
+      ['update the plugin', ['claude', 'plugin', 'update', PLUGIN_ID]],
+    ]
+    for (const [what, argv] of steps) {
+      const run = await $.process.run(argv, { timeoutMs: 120_000 })
+      if (run.exitCode !== 0) {
+        const why = lastLine(run.stderr) || lastLine(run.stdout) || `exit ${run.exitCode}`
+        await say(`Update failed to ${what}: ${why}`)
+        await logEvent($, `Update failed: ${why}`)
+        return
+      }
+    }
+    await say('Updated: reloading plugins…')
+    await logEvent($, 'Updated from GitHub: reloading plugins')
+    await $.command.run({ command: 'reload-plugins' })
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error)
+    await say(`Update failed: ${why}`)
+    await logEvent($, `Update failed: ${why}`)
   }
 }
 
@@ -615,6 +653,27 @@ export const register: Register = on => {
 
     // Event Message: the newest three events, each in a rounded frame, its
     // stamp (YYYYMMDD-hhmm) on the first row and its summary from the second.
+    // Setting, at the very bottom: Update fetches the latest from GitHub.
+    const settingsOpen = await read($, settingsOpenAtom)
+    const updateStatus = await read($, updateStatusAtom)
+    const setting = (
+      <Box flexDirection="column">
+        {rule}
+        {header('Setting', 'settings-toggle', settingsOpen, () => update($, settingsOpenAtom, o => !o))}
+        {settingsOpen && (
+          <Box flexDirection="column">
+            <Box flexDirection="row" marginLeft={2}>
+              <Button key="update" label="[Update]" plain onPress={() => updatePlugin($)} />
+              <Text dimColor>: update slime-dashboard</Text>
+            </Box>
+            {updateStatus !== '' && (
+              <Text dimColor wrap="wrap">{`  ${updateStatus}`}</Text>
+            )}
+          </Box>
+        )}
+      </Box>
+    )
+
     const allEvents = await read($, eventsAtom)
     const events = allEvents.slice(0, SHOWN_EVENTS)
     const eventsOpen = await read($, eventsOpenAtom)
@@ -876,6 +935,7 @@ export const register: Register = on => {
           {skillBox}
           {monitor}
           {eventMessage}
+          {setting}
         </Box>
       )
     }
@@ -889,6 +949,7 @@ export const register: Register = on => {
         {skillBox}
         {monitor}
         {eventMessage}
+        {setting}
       </Box>
     )
   })

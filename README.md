@@ -16,6 +16,7 @@ A Claude Code side pane in the spirit of the offline dino game, starring a slime
 - **Property**: opens to show the model, the reasoning effort, the session's cache hit rate, the tokens it has used, the current turn's iterations, and how long the latest turn took. Pressing the model opens `[Haiku][Sonnet][Opus][Fable]`, and picking one runs `/model` with it; pressing the effort opens `[Low][Mid][High][xHigh][Max]`, and picking one runs `/effort` with it.
 - **Skill Box**: opens to a prompt field over your skills, filed by category; each category opens and closes and shows five rows at a time, each skill's description dim after its name. Pressing `[skill]` runs `/skill "prompt"`, or `/skill` alone with the field empty. **General** always holds `[Unload]: compact context window`, which runs `/compact`.
 - **Model buttons**: switch the session's model from the pane.
+- **Setting**: at the bottom, opens to `[Update]: update slime-dashboard`, which fetches the latest version from GitHub, updates the installed plugin and reloads plugins in the session. It updates a plugin installed with `/plugin install`; a copy loaded with `--plugin-dir` is updated with `git pull` instead.
 - **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) every 15 minutes (wttr.in places you by your IP address). `/slime-subagent-dashboard weather` reads it now and says what it got, or why it got nothing.
 
 ## Install

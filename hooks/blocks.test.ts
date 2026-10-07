@@ -320,3 +320,41 @@ test('parseAdd and grouped: categories in order, General first with Unload', asy
   const groups = grouped([{ name: 'lint', category: 'Code' }, { name: 'timer', category: 'General' }])
   expect(groups.map(g => [g.category, g.skills.map(s => s.name)])).toEqual([['General', ['Unload', 'timer']], ['Code', ['lint']]])
 })
+
+test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a failure says why', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  const ran: string[] = []
+  let failOn = ''
+  on('process.run', async (_$, e) => {
+    const line = e.argv.join(' ')
+    ran.push(line)
+    return line.includes(failOn) && failOn !== ''
+      ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-subagent-dashboard" is not installed' } }
+      : { value: { exitCode: 0, stdout: 'ok', stderr: '' } }
+  })
+  let reloads = 0
+  on('command.run', { command: 'reload-plugins' }, async () => {
+    reloads++
+    return { text: '' }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'update' })).toBeUndefined()
+  await ui.press({ key: 'settings-toggle' })
+  expect((await ui.find({ key: 'update' }))?.text).toBe('[Update]')
+  expect(await ui.find({ type: 'Text', text: ': update slime-dashboard' })).toBeDefined()
+
+  await ui.press({ key: 'update' })
+  expect(ran).toEqual([
+    'claude plugin marketplace update slime-subagent-dashboard',
+    'claude plugin update slime-subagent-dashboard@slime-subagent-dashboard',
+  ])
+  expect(reloads).toBe(1)
+  expect(await ui.find({ type: 'Text', text: /Updated: reloading plugins/ })).toBeDefined()
+
+  failOn = 'plugin update'
+  await ui.press({ key: 'update' })
+  expect(reloads).toBe(1)
+  expect(await ui.find({ type: 'Text', text: /Update failed to update the plugin: Plugin "slime-subagent-dashboard" is not installed/ })).toBeDefined()
+  await ui.unmount()
+})

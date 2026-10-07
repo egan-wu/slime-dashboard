@@ -33,6 +33,8 @@ declare module 'claude-code' {
       events: SlimeEventEntry[]
       monitorOpen: boolean
       eventsOpen: boolean
+      settingsOpen: boolean
+      updateStatus: string
     }
   }
 }
