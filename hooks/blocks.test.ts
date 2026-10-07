@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
+import { addEvent, offsetOf, stamp } from './events'
 import { ASK, frame, ROWS } from './scene'
 
 const PLUGIN = 'slime-subagent-dashboard'
@@ -57,6 +58,7 @@ test('waiting on the person: a small flashing bubble, a bold question mark laid 
 
 test('the Skill Box sends a skill with the typed prompt, the Property block opens', async ($, on) => {
   mock.store(on)
+  mock.clock(on)
   const ran: string[] = []
   on('command.run', { command: 'run-unit-test' }, async (_$, e) => {
     ran.push(e.args)
@@ -210,6 +212,7 @@ test('Model opens a row of the families; picking one runs /model', async ($, on)
 
 test('a skill that does not run says why and keeps the prompt', async ($, on) => {
   mock.store(on)
+  mock.clock(on)
   const toasts: string[] = []
   on('ui.toast', async (_$, e) => {
     toasts.push(String((e as { text?: string }).text ?? e))
@@ -225,5 +228,42 @@ test('a skill that does not run says why and keeps the prompt', async ($, on) =>
   await ui.press({ key: 'skill-nope' })
   expect(toasts.some(t => t.includes('sending /nope "30"'))).toBe(true)
   expect(toasts.some(t => t.includes('/nope "30" did not run'))).toBe(true)
+  await ui.unmount()
+})
+
+test('event stamps read YYYYMMDD-hhmm in the machine\'s zone, newest first, twenty kept', async () => {
+  expect(offsetOf('00:39:17+0800')).toBe(480)
+  expect(offsetOf('19:58:04-0330')).toBe(-210)
+  expect(offsetOf('05:50:42')).toBeUndefined()
+  // 2026-10-07 16:56 UTC is 2026-10-08 00:56 at +08:00.
+  expect(stamp(Date.UTC(2026, 9, 7, 16, 56), 480)).toBe('20261008-0056')
+  let list = [] as { at: number; text: string }[]
+  for (let i = 0; i < 25; i++) list = addEvent(list, { at: i, text: `e${i}` })
+  expect(list).toHaveLength(20)
+  expect(list[0]!.text).toBe('e24')
+})
+
+test('the Event Message block shows the newest three, each framed, stamp then summary', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: Date.UTC(2026, 9, 7, 16, 56) })
+  on('command.run', { command: 'effort' }, async () => ({ text: '' }))
+  on('command.run', { command: 'compact' }, async () => ({ text: '' }))
+  const run = (command: string, args = '') =>
+    $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await run('effort', 'high')
+  await run('compact')
+  await run('effort', 'low')
+  await run('effort', 'max')
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
+  const from = texts.indexOf('Event Message')
+  expect(from).toBeGreaterThan(-1)
+  const after = texts.slice(from + 1)
+  // Newest first, three of the four; each stamp row then its summary.
+  expect(after.filter(t => /^\d{8}-\d{4}$/.test(t))).toHaveLength(3)
+  expect(after.filter(t => /^(Effort|Unloaded)/.test(t))).toEqual(['Effort: Max', 'Effort: Low', 'Unloaded: the context was'])
+  // A summary too long for the frame goes on to a second row.
+  expect(after).toContain('compacted')
   await ui.unmount()
 })

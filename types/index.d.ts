@@ -1,4 +1,6 @@
 export type SlimeModel = string
+// One line of the Event Message block (hooks/events.ts): when, and what happened.
+export type SlimeEventEntry = { at: number; text: string }
 // Tokens the session's turns used, by kind (hooks/props.ts).
 export type SlimeTally = { input: number; cacheWrite: number; cacheRead: number; output: number }
 // What is left of the usage limits and how full the context is (hooks/vitals.ts).
@@ -25,6 +27,7 @@ declare module 'claude-code' {
       effort: string
       effortOpen: boolean
       modelOpen: boolean
+      events: SlimeEventEntry[]
     }
   }
 }

@@ -3,6 +3,8 @@ import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
 import { ASK, bubbleCell, bubbleFill, EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
 import type { Offsets } from './scene'
+import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
+import type { SlimeEvent } from './events'
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import type { Tally } from './props'
 import { cleanSummary, wrapSummary } from './summary'
@@ -53,6 +55,8 @@ const tallyAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'tally' } as c
 const iterationAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'iteration' } as const, 0)
 // The main loop's reasoning effort as its last model request was sent ('' before one).
 const effortAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effort' } as const, '')
+// The Event Message block's events, newest first.
+const eventsAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'events' } as const, [] as SlimeEvent[])
 // Whether the row of effort levels under Property's Effort is open.
 const modelOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'modelOpen' } as const, false)
 const effortOpenAtom = atom({ plugin: 'slime-subagent-dashboard', key: 'effortOpen' } as const, false)
@@ -76,6 +80,9 @@ let minions: SlimeMinion[] = []
 let weather: SlimeWeather = DEFAULT_WEATHER
 let vitals: Vitals = FULL
 let waiting = false
+// The machine's UTC offset in minutes, from wttr.in's local time; until it is
+// read, event stamps use the plugin environment's own zone.
+let tzOffset: number | undefined
 // The tick the troop found its treasure chest on, while that scene plays.
 let partyAt: number | undefined
 // When each new little slime starts budding off the main one. They come out
@@ -138,6 +145,19 @@ const partyTick = () => (partyAt === undefined ? undefined : tick - partyAt)
 // back into the main slime.
 const OUT: ReadonlySet<AgentStatus> = new Set(['pending', 'running', 'waiting', 'idle'])
 
+// Writing down an event never gets in the way of what it describes.
+async function logEvent($: EngineInterface, text: string) {
+  try {
+    const at = await $.clock.now()
+    await update($, eventsAtom, list => addEvent(list, { at, text }))
+  } catch {
+    // The event goes unrecorded.
+  }
+}
+
+const agentLine = (m: { model: string; description?: string }) =>
+  `${modelInfo(m.model).name}: ${cleanSummary(m.description || 'subagent')}`
+
 async function checkMinions($: EngineInterface) {
   if (!minions.some(m => !m.done)) return
   const out = new Set((await $.agent.list()).filter(a => OUT.has(a.status)).map(a => a.id))
@@ -152,6 +172,7 @@ async function checkMinions($: EngineInterface) {
     pos.delete(m.id)
   }
   await setMinions($, list => list.map(m => (finished.includes(m) ? { ...m, done: true } : m)))
+  for (const m of finished) await logEvent($, `✔ Finished ${agentLine(m)}`)
   if (!minions.some(m => !m.done) && partyAt === undefined) partyAt = tick
 }
 
@@ -191,6 +212,7 @@ async function refreshWeather($: EngineInterface): Promise<string> {
     const reply = await $.http.fetch(WEATHER_URL, { headers: { 'User-Agent': 'curl/8' } })
     const next = reply.ok ? parseWeather(reply.text) : undefined
     if (next) {
+      tzOffset = offsetOf(reply.text.split('|')[3] ?? '') ?? tzOffset
       weather = next
       await update($, weatherAtom, () => next)
       return `Weather: ${next.day ? 'day' : 'night'}, ${next.sky} (wttr.in said "${reply.text.trim()}").`
@@ -212,14 +234,18 @@ async function refreshWeather($: EngineInterface): Promise<string> {
 async function refreshModel($: EngineInterface) {
   const current = await $.session.model()
   if (current === model) return
+  if (model !== '') await logEvent($, `Model: ${modelInfo(model).name} → ${modelInfo(current).name}`)
   model = current
   await update($, modelAtom, () => current)
 }
 
 async function setVitals($: EngineInterface, next: Vitals) {
   if (next.plan === vitals.plan && next.hp === vitals.hp && next.mp === vitals.mp && next.cp === vitals.cp) return
+  const wasDown = isDown(vitals)
   vitals = next
   await update($, vitalsAtom, () => next)
+  if (!wasDown && isDown(next)) await logEvent($, `x Out of ${next.hp <= 0 ? 'HP' : 'MP'}: resting until the limit resets`)
+  if (wasDown && !isDown(next)) await logEvent($, 'Back on its feet: a limit has reset')
 }
 
 // The status line's figures. A failed read keeps the bars as they were.
@@ -239,6 +265,7 @@ async function setWaiting($: EngineInterface, value: boolean) {
   if (value === waiting) return
   waiting = value
   await update($, waitingAtom, () => value)
+  await logEvent($, value ? '? Waiting for your answer' : 'Answered: the troop moves on')
 }
 
 async function setSkills($: EngineInterface, fn: (list: string[]) => string[]) {
@@ -259,11 +286,13 @@ async function runSkill($: EngineInterface, name: string) {
   try {
     await $.command.run({ command: name, args })
     await update($, skillPromptAtom, () => '')
+    await logEvent($, `Skill sent: ${typed}`)
   } catch (error) {
     // An unknown skill (not in this session's slash commands) lands here; the
     // prompt stays in the field to try again.
     const why = error instanceof Error ? error.message : String(error)
     $.ui.toast(`Skill Box: ${typed} did not run: ${why}`)
+    await logEvent($, `Skill did not run: ${typed}`)
   }
 }
 
@@ -380,7 +409,19 @@ export const register: Register = on => {
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const ran = await next(e)
     const level = e.args.trim().toLowerCase()
-    if (EFFORTS.some(x => x.level === level)) await update($, effortAtom, () => level).catch(() => {})
+    const known = EFFORTS.find(x => x.level === level)
+    if (known) {
+      await update($, effortAtom, () => level).catch(() => {})
+      await logEvent($, `Effort: ${known.name}`)
+    }
+
+    return ran
+  }).catch(($, e, next) => next(e))
+
+  // /compact, from the CP bar or typed: the context has been unloaded.
+  on('command.run', { command: 'compact' }, async ($, e, next) => {
+    const ran = await next(e)
+    await logEvent($, 'Unloaded: the context was compacted')
 
     return ran
   }).catch(($, e, next) => next(e))
@@ -404,7 +445,9 @@ export const register: Register = on => {
     if (id !== undefined) {
       lastBud = Math.max(tick, lastBud + EMERGE_GAP)
       budAt.set(id, lastBud)
-      await setMinions($, list => [...list, { id, model: result.model ?? e.parentModel, description: e.description }]).catch(() => {})
+      const minion = { id, model: result.model ?? e.parentModel, description: e.description }
+      await setMinions($, list => [...list, minion]).catch(() => {})
+      await logEvent($, `▶ Started ${agentLine(minion)}`)
     }
 
     return result
@@ -523,6 +566,31 @@ export const register: Register = on => {
       </Box>
     )
 
+    const rule = <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
+    // Event Message: the newest three events, each in a rounded frame, its
+    // stamp (YYYYMMDD-hhmm) on the first row and its summary from the second.
+    const events = (await read($, eventsAtom)).slice(0, SHOWN_EVENTS)
+    const paneWidth = Math.max(8, (columns || OPEN.columns) - 1)
+    const eventMessage = (
+      <Box flexDirection="column">
+        {rule}
+        <Text dimColor>Event Message</Text>
+        {events.length === 0 ? (
+          <Text dimColor> - none</Text>
+        ) : (
+          events.map((ev, i) => (
+            <Box key={`event-${ev.at}-${i}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={paneWidth}>
+              <Text bold>{stamp(ev.at, tzOffset)}</Text>
+              {/* Inside the frame: the pane's width less two borders and two spaces. */}
+              {wrapSummary(ev.text, paneWidth - 4, 2).map(line => (
+                <Text>{line}</Text>
+              ))}
+            </Box>
+          ))
+        )}
+      </Box>
+    )
+
     // HP and MP (a subscription) or HP alone (an API key or enterprise seat)
     // on the first row; CP and the button that compacts the context on the second.
     // The percentage always takes four columns (`5%  `, `100%`), so the bars'
@@ -581,7 +649,6 @@ export const register: Register = on => {
       </Box>
     )
 
-    const rule = <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1))}</Text>
     // A block's title and the button that opens or closes it.
     const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
       <Box flexDirection="row">
@@ -747,6 +814,7 @@ export const register: Register = on => {
           {property}
           {skillBox}
           {monitor}
+          {eventMessage}
         </Box>
       )
     }
@@ -759,6 +827,7 @@ export const register: Register = on => {
         {property}
         {skillBox}
         {monitor}
+        {eventMessage}
       </Box>
     )
   })
