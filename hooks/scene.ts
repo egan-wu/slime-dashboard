@@ -398,11 +398,11 @@ export const POTION_COLORS = {
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
 // Unloading (the context compacting): the slime sets its load down. Every
-// few ticks its body flashes green and it spits a spray of the goo it ate out
+// few ticks its body flashes white and it spits a spray of the goo it ate out
 // of its back, which arc off to the left, land and vanish; green arrows fall
 // beside it, until the compaction ends.
 export const UNLOAD_COLORS = {
-  glow: { B: 0x7ae582, H: 0xd8f8dc, M: 0xa8eeb0, D: 0x38b000 },
+  glow: { B: 0xffffff, H: 0xffffff, M: 0xe8e8e8, D: 0xb8b8b8 },
   pixels: GOO_COLORS,
   arrow: 0x38b000,
 } as const
@@ -683,7 +683,7 @@ export function frame(
         })
       }
     }
-    // It flashes green as each spray leaves it.
+    // It flashes white as each spray leaves it.
     const glowing = unloading && tick % SPIT_EVERY < 2
     const body = { ...(glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint), ...MOUTH }
     draw({ rows, colors: body }, left, bottom)
