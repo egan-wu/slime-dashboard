@@ -1,5 +1,7 @@
 # slime-dashboard
 
+Stop watching the logs, watch slimes!
+
 A pixel-art slime that lives in Claude Code's side pane. It crawls along while Claude works and naps while Claude waits, with your usage limits, context, subagents and recent events all around it, at a glance.
 
 <img src="docs/top.gif" width="420" alt="The pane at work: HP, MP and CP bars over a red slime crawling past trees, rocks and goo, two little subagent slimes hopping behind it">
@@ -21,6 +23,8 @@ To update later, press `[Update]` under [Setting](#setting).
 <img src="docs/session.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners">
 
 At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename typed at the prompt shows after the next one.
+
+`[≡]` at the sign's left lists this project's recent sessions under it, newest first: each by its name (the `/rename` one, else Claude Code's, else when it was last used) with how long ago (`5m`, `3h`, `2d`). Pressing one resumes it (`/resume`); `[≡]` again closes the list. The session you are in, and any never typed into, are left out.
 
 The sign is also a button. Pressed, it opens a field under it; type a new name, then press the sign again to run `/rename` with it. Enter only keeps the text. A field left empty or unchanged closes without renaming, and `[x]` beside it closes it too. A rename is logged in Event Message as `Renamed: old → new`, so a wrong one can be undone by renaming back.
 
@@ -59,11 +63,31 @@ Below them: the cache hit rate, the tokens used, the iterations, and the latest 
 | Button | What it does |
 | --- | --- |
 | Prompt for skill | Type here; the next skill you press is sent with it. Enter keeps the text, it does not send. |
-| `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
+| `▼ General` / `▸ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
+| `[▼]` `[▲]` (right of a category) | Moves the category a place down or up, kept across sessions. |
+| `[▼]` (before a skill) | Trades places with the skill under it, kept across sessions. |
+| **Party Combo** | The combos saved in [Skill Tree](#skill-tree), each a button; pressed, it runs with the prompt as its input. |
 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | `[Respawn]` | Built in: starts a new session (`/clear`), once confirmed. Pressed, its row asks `[Respawn]: [N]/[Y]`; `[N]` (grey under the pointer) backs out, `[Y]` (red under the pointer) clears. The old slime hops twice and leaps off to the right, turning half over; a great beam of light comes down in the middle of the scene, a ring of light runs out along the ground, glowing motes scatter, and a new slime takes shape in the beam, glints, pauses a second, then crawls to its place. |
 
 Skills are added with `/slime-dashboard add` (see [Usage](#usage)).
+
+## Skill Tree
+
+Party Combos: your Skill Box skills chained into waves, each skill run by a subagent with the model and subagent type you pick, and Claude leading the whole run. The waves run in order; the skills of one wave all start at once, and the next wave waits for them all. For example, build, then unit-test, then check the result on Sonnet while Haiku archives the logs, at the same time.
+
+| Button | What it does |
+| --- | --- |
+| `[Combo 1]` … `[+New]` | One tab per combo; `[+New]` starts one. A tab with `*` has unsaved edits. |
+| `▾ Name` (the purple banner) | Folds the combo to its name, and opens it again. `[Rename]` beside it renames it. |
+| `Wave 1` … `▲ ▼ ✕` | Each wave is a rounded box; `▲ ▼` move it, `✕` removes it. |
+| `■ /skill  Haiku  general  ✕` | A skill in the wave, its swatch in its model's color. Press the model to cycle Haiku → Sonnet → Opus → Fable, the subagent type to cycle general → explore → plan (then your own agents from `.claude/agents/`), `✕` to take it out. In a narrow pane the model and type go on a second line. |
+| `+ skill` | Lists the Skill Box's skills not yet in the wave, side by side; each press adds one. |
+| `◆ + condition` | Between a wave and the next: what Claude should do with what came back, in your own words (`if Pass, report done; if Fail, run the debug wave`). Pressed, it opens a field. |
+| `+ Wave` | Adds a wave at the end. |
+| `[Save]` / `[Delete]` | Edits stay a draft, so trying things never breaks a combo that works, until `[Save]` (green under the pointer) keeps them; empty waves are dropped then. `[Delete]` (red under the pointer) asks `[Delete [Y]/[N]]`. |
+
+A saved combo shows in the Skill Box under **Party Combo**. Explore and plan subagents only read, so a skill that writes files (a build, an archive) wants general.
 
 ## Party
 
@@ -84,7 +108,7 @@ The newest three events, each framed, with this computer's local time (`YYYYMMDD
 | Button | What it does |
 | --- | --- |
 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked each time the dashboard loads: at session start and at each reload). |
-| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Property, Skill Box, Party, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
+| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Property, Skill Box, Skill Tree, Party, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and Party, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
@@ -114,7 +138,7 @@ Skills go in the Skill Box with `add`. Without `--category` a skill goes under *
 /slime-dashboard add run-unit-test --category Test --desc run the unit tests
 ```
 
-The skills you add are kept on this computer, across sessions; another computer starts with General's `[Unload]` alone.
+The skills you add, their order and your Party Combos are kept on this computer, shared by every project and session (each reads them as it starts); another computer starts with General's `[Unload]` alone.
 
 ## Development
 

@@ -8,9 +8,11 @@ import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
 import type { SlimeEvent } from './events'
 import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import type { Tally } from './props'
-import { grouped, parseAdd, skillsFrom } from './skills'
+import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
-import { cleanSummary, titleFrom, wrapSummary } from './summary'
+import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
+import type { Combo } from './combos'
+import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
@@ -18,7 +20,7 @@ import { DEFAULT_ORDER, moveSection, orderFrom, SECTIONS } from './layout'
 import type { SectionId } from './layout'
 import { VERSION } from './version'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL, weatherNow } from './weather'
-import type { SlimeMinion, SlimeWeather } from '../types'
+import type { SlimeMinion, SlimeRecentSession, SlimeWeather } from '../types'
 
 const PANE = 'slime-dashboard'
 const SCENE = 'scene'
@@ -61,12 +63,19 @@ const sessionTitleAtom = atom({ plugin: 'slime-dashboard', key: 'sessionTitle' }
 // Pressing the sign opens a field under it for a new name (renameDraft).
 const renameOpenAtom = atom({ plugin: 'slime-dashboard', key: 'renameOpen' } as const, false)
 const renameDraftAtom = atom({ plugin: 'slime-dashboard', key: 'renameDraft' } as const, '')
+// The sign's [≡] opens a list of the project's recent sessions, to resume one.
+const sessionsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'sessionsOpen' } as const, false)
+const recentSessionsAtom = atom({ plugin: 'slime-dashboard', key: 'recentSessions' } as const, [] as SlimeRecentSession[])
+const RECENT_SESSIONS = 8
 // The Skill Box's Respawn asks first: its row turns into [Y]/[N].
 const respawnConfirmAtom = atom({ plugin: 'slime-dashboard', key: 'respawnConfirm' } as const, false)
 // The tick Respawn cleared the session on, while its scene plays.
 let respawnAt: number | undefined
 const respawnTick = () => (respawnAt === undefined ? undefined : tick - respawnAt)
 const RESPAWN_RED = '#d62828'
+// The Skill Tree's combo: its name on a purple banner (and the box's edge),
+// and the green of [Save].
+const COMBO = { banner: '#5a189a', text: '#ffffff', save: '#38b000' }
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
 // True while the session waits on the person: a permission prompt or a question.
 const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const, false)
@@ -80,6 +89,32 @@ const skillPromptAtom = atom({ plugin: 'slime-dashboard', key: 'skillPrompt' } a
 // (a category is open until closed).
 const skillTopsAtom = atom({ plugin: 'slime-dashboard', key: 'skillTops' } as const, {} as Record<string, number>)
 const skillCatsClosedAtom = atom({ plugin: 'slime-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
+// The person's arrangement of the Skill Box (kept in the store): the skills of
+// each category in order, and the categories in order.
+const skillOrderAtom = atom({ plugin: 'slime-dashboard', key: 'skillOrder' } as const, {} as Record<string, string[]>)
+const catOrderAtom = atom({ plugin: 'slime-dashboard', key: 'catOrder' } as const, [] as string[])
+// The Skill Tree: the Party Combos as saved (kept in the store across
+// sessions), whether it is open, the combo being edited (its tab: the name it
+// was saved under, or a new one's), its box folded to its name, the wave
+// whose + skill lists the skills to add (-1: none), the wave whose condition
+// field is open (-1: none), the rename field, and the subagent types the
+// session offers.
+const combosAtom = atom({ plugin: 'slime-dashboard', key: 'combos' } as const, [] as Combo[])
+const treeOpenAtom = atom({ plugin: 'slime-dashboard', key: 'treeOpen' } as const, false)
+const comboSelAtom = atom({ plugin: 'slime-dashboard', key: 'comboSel' } as const, '')
+const comboFoldAtom = atom({ plugin: 'slime-dashboard', key: 'comboFold' } as const, false)
+const comboPickAtom = atom({ plugin: 'slime-dashboard', key: 'comboPick' } as const, -1)
+const comboCondAtom = atom({ plugin: 'slime-dashboard', key: 'comboCond' } as const, -1)
+const comboRenameAtom = atom({ plugin: 'slime-dashboard', key: 'comboRename' } as const, false)
+const comboNameAtom = atom({ plugin: 'slime-dashboard', key: 'comboName' } as const, '')
+// Edits wait in a draft per tab until [Save] keeps them, so trying something
+// out never spoils a combo that works; a new combo is a tab of its own (fresh)
+// until its first save.
+const comboEditsAtom = atom({ plugin: 'slime-dashboard', key: 'comboEdits' } as const, {} as Record<string, Combo>)
+const comboFreshAtom = atom({ plugin: 'slime-dashboard', key: 'comboFresh' } as const, [] as string[])
+// Delete asks first: [Delete [Y]/[N]].
+const comboDeleteAtom = atom({ plugin: 'slime-dashboard', key: 'comboDelete' } as const, false)
+const agentsAtom = atom({ plugin: 'slime-dashboard', key: 'agents' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
 const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as const, false)
 // The Setting block: open or not.
@@ -121,6 +156,9 @@ const turnStartedAtAtom = atom({ plugin: 'slime-dashboard', key: 'turnStartedAt'
 
 const SKILL_ROWS = 5
 const SKILLS_KEY = 'skills'
+const COMBOS_KEY = 'combos'
+const SKILL_ORDER_KEY = 'skillOrder'
+const CAT_ORDER_KEY = 'catOrder'
 const HIDDEN_KEY = 'hidden'
 const COLORS_KEY = 'colors'
 const ORDER_KEY = 'order'
@@ -153,13 +191,61 @@ let tzOffset: number | undefined
 // The name from the session's transcript, for a load that has not seen a
 // prompt carry it yet: the last /rename, else the last name made up for it.
 async function readSessionTitle($: EngineInterface) {
-  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
-  const project = (await $.session.cwd()).replace(/[^A-Za-z0-9]/g, '-')
-  const file = `${configDir}/projects/${project}/${await $.session.id()}.jsonl`
+  const file = `${await projectDir($)}/${await $.session.id()}.jsonl`
   const run = await $.process.run(['grep', '-o', '"\\(customTitle\\|aiTitle\\)":"[^"]*"', file]).catch(() => undefined)
   if (run?.exitCode !== 0) return
   const named = titleFrom(run.stdout)
   if (named) await setSessionTitle($, named)
+}
+
+// The project's transcripts, where readSessionTitle reads this session's.
+async function projectDir($: EngineInterface) {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
+  return `${configDir}/projects/${(await $.session.cwd()).replace(/[^A-Za-z0-9]/g, '-')}`
+}
+
+// [≡] pressed: closed, it lists the recent sessions (read afresh each time:
+// the newest transcripts' names, grep'd as readSessionTitle does); open, it
+// closes.
+async function pressSessions($: EngineInterface) {
+  if (await read($, sessionsOpenAtom)) {
+    await update($, sessionsOpenAtom, () => false)
+    return
+  }
+  await update($, sessionsOpenAtom, () => true)
+  const dir = await projectDir($)
+  const entries = await $.fs.list(dir).catch(() => [])
+  // A few more than are shown, as some turn out never typed into.
+  const newest = entries
+    .filter(f => f.kind === 'file' && f.name.endsWith('.jsonl'))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, RECENT_SESSIONS * 2 + 1)
+  const found = await Promise.all(
+    newest.map(async f => {
+      const run = await $.process.run(['grep', '-o', '"\\(customTitle\\|aiTitle\\)":"[^"]*"\\|"type":"user"', `${dir}/${f.name}`]).catch(() => undefined)
+      return { id: f.name.slice(0, -'.jsonl'.length), at: f.mtimeMs, lines: run?.stdout ?? '' }
+    }),
+  )
+  const offset = tzOffset ?? 0
+  const untitled = (at: number) => {
+    const d = new Date(at + offset)
+    const two = (n: number) => String(n).padStart(2, '0')
+    return `${two(d.getUTCMonth() + 1)}/${two(d.getUTCDate())} ${two(d.getUTCHours())}:${two(d.getUTCMinutes())}`
+  }
+  const list = recentFrom(found, await $.session.id(), RECENT_SESSIONS, untitled)
+  await update($, recentSessionsAtom, () => list)
+}
+
+// A recent session picked: /resume takes the panel to it.
+async function resumeSession($: EngineInterface, s: SlimeRecentSession) {
+  await update($, sessionsOpenAtom, () => false)
+  await logEvent($, `Resume: ${s.title}`)
+  try {
+    await $.command.run({ command: 'resume', args: s.id })
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error)
+    $.ui.toast(`Session: /resume did not run: ${why}`)
+  }
 }
 
 // The sign pressed: closed, it opens the field holding the current name;
@@ -488,6 +574,21 @@ async function setSkills($: EngineInterface, fn: (list: Skill[]) => Skill[]) {
   return list
 }
 
+// A skill's [▼]: it trades places with the one under it, in its category's
+// order as shown; the arrangement is kept.
+async function skillDown($: EngineInterface, category: string, names: string[], at: number) {
+  const next = { ...(await read($, skillOrderAtom)), [category]: swapNames(names, at) }
+  await update($, skillOrderAtom, () => next)
+  await $.store.set(SKILL_ORDER_KEY, next)
+}
+
+// A category's [▼] or [▲]: it trades places with the next or the one before.
+async function moveCategory($: EngineInterface, categories: string[], at: number, by: -1 | 1) {
+  const next = swapNames(categories, at, by)
+  await update($, catOrderAtom, () => next)
+  await $.store.set(CAT_ORDER_KEY, next)
+}
+
 // A skill's button: run it as the person would type it, with the Skill Box's
 // prompt after it in quotes when one is typed; the field then clears.
 async function runSkill($: EngineInterface, skill: Skill) {
@@ -507,6 +608,109 @@ async function runSkill($: EngineInterface, skill: Skill) {
     const why = error instanceof Error ? error.message : String(error)
     $.ui.toast(`Skill Box: ${typed} did not run: ${why}`)
     await logEvent($, `Skill did not run: ${typed}`)
+  }
+}
+
+async function setCombos($: EngineInterface, fn: (list: Combo[]) => Combo[]) {
+  const list = fn(await read($, combosAtom))
+  await update($, combosAtom, () => list)
+  await $.store.set(COMBOS_KEY, list)
+  return list
+}
+
+// The combo a tab shows: its draft, else as saved.
+async function comboOf($: EngineInterface, tab: string): Promise<Combo | undefined> {
+  return (await read($, comboEditsAtom))[tab] ?? (await read($, combosAtom)).find(c => c.name === tab)
+}
+
+// An edit to a tab's combo, into its draft.
+async function editCombo($: EngineInterface, tab: string, fn: (c: Combo) => Combo) {
+  const combo = await comboOf($, tab)
+  if (combo) await update($, comboEditsAtom, d => ({ ...d, [tab]: fn(combo) }))
+}
+
+// Every name taken, saved or new, but the tab's own.
+async function namesBesides($: EngineInterface, tab: string) {
+  const saved = (await read($, combosAtom)).map(c => c.name)
+  const drafts = Object.entries(await read($, comboEditsAtom)).filter(([t]) => t !== tab).map(([, c]) => c.name)
+  return [...new Set([...saved, ...(await read($, comboFreshAtom)), ...drafts])].filter(n => n !== tab).map(name => ({ name, layers: [] }))
+}
+
+// Skill Tree's [+New]: a new combo with one empty wave, kept once saved.
+async function newCombo($: EngineInterface) {
+  const name = newComboName(await namesBesides($, ''))
+  await update($, comboFreshAtom, f => [...f, name])
+  await update($, comboEditsAtom, d => ({ ...d, [name]: addLayer({ name, layers: [] }) }))
+  await selectCombo($, name)
+  await update($, comboFoldAtom, () => false)
+}
+
+async function selectCombo($: EngineInterface, tab: string) {
+  await update($, comboSelAtom, () => tab)
+  await update($, comboPickAtom, () => -1)
+  await update($, comboCondAtom, () => -1)
+  await update($, comboRenameAtom, () => false)
+  await update($, comboDeleteAtom, () => false)
+}
+
+// [Rename] pressed: closed, it opens a field holding the name; open, the
+// draft takes what it holds, unless that is empty or another's.
+async function pressRename($: EngineInterface, tab: string) {
+  const combo = await comboOf($, tab)
+  if (!combo) return
+  if (!(await read($, comboRenameAtom))) {
+    await update($, comboNameAtom, () => combo.name)
+    await update($, comboRenameAtom, () => true)
+    return
+  }
+  await update($, comboRenameAtom, () => false)
+  const to = renameOk(await namesBesides($, tab), combo.name, await read($, comboNameAtom))
+  if (to && to !== combo.name) await editCombo($, tab, c => ({ ...c, name: to }))
+}
+
+// [Save]: the draft is kept, under its (new) name, in place of the saved one.
+async function saveCombo($: EngineInterface, tab: string) {
+  const edited = (await read($, comboEditsAtom))[tab]
+  if (!edited) return
+  // A wave left with no skill has nothing to run: it goes, its condition too.
+  const draft = { ...edited, layers: edited.layers.filter(l => l.steps.length > 0) }
+  const fresh = (await read($, comboFreshAtom)).includes(tab)
+  await setCombos($, list => (fresh ? [...list, draft] : list.map(c => (c.name === tab ? draft : c))))
+  await update($, comboFreshAtom, f => f.filter(t => t !== tab))
+  await update($, comboEditsAtom, ({ [tab]: _, ...rest }) => rest)
+  await update($, comboSelAtom, () => draft.name)
+  await update($, comboRenameAtom, () => false)
+  $.ui.toast(`Skill Tree: saved ${draft.name}`)
+  await logEvent($, `Combo saved: ${draft.name}`)
+}
+
+// [Delete] then [Y]: gone, saved or not.
+async function deleteCombo($: EngineInterface, tab: string) {
+  await setCombos($, l => l.filter(c => c.name !== tab))
+  await update($, comboFreshAtom, f => f.filter(t => t !== tab))
+  await update($, comboEditsAtom, ({ [tab]: _, ...rest }) => rest)
+  const left = [...(await read($, combosAtom)).map(c => c.name), ...(await read($, comboFreshAtom))]
+  await selectCombo($, left[0] ?? '')
+}
+
+// A combo's button: the main model is asked to lead it, with the Skill Box's
+// prompt as its input; the field then clears.
+async function runCombo($: EngineInterface, combo: Combo) {
+  const input = await read($, skillPromptAtom)
+  const text = comboPrompt(combo, input)
+  if (text === undefined) {
+    $.ui.toast(`Party Combo: ${combo.name} has no skill yet`)
+    return
+  }
+  $.ui.toast(`Party Combo: sending ${combo.name}`)
+  try {
+    await $.prompt.submit({ text })
+    await update($, skillPromptAtom, () => '')
+    await logEvent($, `Combo sent: ${combo.name}`)
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error)
+    $.ui.toast(`Party Combo: ${combo.name} did not run: ${why}`)
+    await logEvent($, `Combo did not run: ${combo.name}`)
   }
 }
 
@@ -647,6 +851,12 @@ export const register: Register = on => {
     await update($, orderAtom, () => orderKept)
     const hiddenKept = await $.store.get(HIDDEN_KEY)
     if (Array.isArray(hiddenKept)) await update($, hiddenAtom, () => hiddenKept.filter((h): h is string => typeof h === 'string'))
+    const skillOrderKept = orderMapFrom(await $.store.get(SKILL_ORDER_KEY))
+    await update($, skillOrderAtom, () => skillOrderKept)
+    const catOrderKept = namesFrom(await $.store.get(CAT_ORDER_KEY))
+    await update($, catOrderAtom, () => catOrderKept)
+    const combosKept = combosFrom(await $.store.get(COMBOS_KEY))
+    await update($, combosAtom, () => combosKept)
     // Names kept before categories come back filed under General.
     await update($, skillsAtom, () => skillsFrom(kept))
     waiting = await read($, waitingAtom)
@@ -762,6 +972,15 @@ export const register: Register = on => {
 
     return next(e)
   })
+
+  // The person's own subagent types the model is offered can be picked for a
+  // combo's step too, after the three built-ins.
+  on('agent.offer', async ($, e, next) => {
+    const offer = await next(e)
+    if (offer.isOffered && forSteps(e.agent, e.source)) await update($, agentsAtom, list => (list.includes(e.agent) ? list : [...list, e.agent])).catch(() => {})
+
+    return offer
+  }).catch(($, e, next) => next(e))
 
   // Each subagent that starts gets a little slime, colored by its model.
   on('agent.spawn', async ($, e, next) => {
@@ -1222,7 +1441,17 @@ export const register: Register = on => {
     // Skill Box: a prompt field over the skills, filed by category. Each
     // category opens and closes and shows five rows at a time; each skill's
     // button runs it with the prompt, its description dim after it.
-    const groups = grouped(await read($, skillsAtom))
+    // The Party Combos come last, under a category of their own.
+    const ownSkills = await read($, skillsAtom)
+    const combos = await read($, combosAtom)
+    const comboRows: Skill[] = combos.map(c => ({ name: c.name, category: COMBO_CATEGORY, description: comboSummary(c) }))
+    const skillOrder = await read($, skillOrderAtom)
+    const groups = inOrder(
+      [...grouped(ownSkills), ...(comboRows.length > 0 ? [{ category: COMBO_CATEGORY, skills: comboRows }] : [])],
+      await read($, catOrderAtom),
+      g => g.category,
+    ).map(g => ({ ...g, skills: inOrder(g.skills, skillOrder[g.category], sk => sk.name) }))
+    const categoryNames = groups.map(g => g.category)
     const skillsOpen = await read($, skillsOpenAtom)
     const skillPrompt = await read($, skillPromptAtom)
     const tops = await read($, skillTopsAtom)
@@ -1237,22 +1466,36 @@ export const register: Register = on => {
     const toggleCategory = (category: string) =>
       update($, skillCatsClosedAtom, c => (c.includes(category) ? c.filter(x => x !== category) : [...c, category]))
     const respawnAsking = await read($, respawnConfirmAtom)
-    const categories = groups.map(g => {
+    const categories = groups.map((g, gi) => {
       const isOpen = !closed.includes(g.category)
       const top = topOf(g)
+      const names = g.skills.map(sk => sk.name)
+      // The category's name opens and closes it; [▼][▲] at the right move it.
       const toggle = (
-        <Button
-          key={`skillcat-${g.category}`}
-          label={`${isOpen ? '▼' : '▲'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
-          plain
-          onPress={() => toggleCategory(g.category)}
-        />
+        <Box flexDirection="row" justifyContent="space-between" flexGrow={1}>
+          <Button
+            key={`skillcat-${g.category}`}
+            label={`${isOpen ? '▼' : '▸'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
+            plain
+            onPress={() => toggleCategory(g.category)}
+          />
+          <Box flexDirection="row" flexShrink={0}>
+            <Button key={`skillcat-down-${g.category}`} label="[▼]" plain dimColor={gi === groups.length - 1} onPress={() => moveCategory($, categoryNames, gi, 1)} />
+            <Button key={`skillcat-up-${g.category}`} label="[▲]" plain dimColor={gi === 0} onPress={() => moveCategory($, categoryNames, gi, -1)} />
+          </Box>
+        </Box>
+      )
+      // Each skill's [▼] trades places with the one under it.
+      const down = (at: number) => (
+        <Button key={`skill-down-${g.category}-${names[at]}`} label="[▼]" plain dimColor={at === names.length - 1} onPress={() => skillDown($, g.category, names, at)} />
       )
       // Closed, a category is its button alone; open, a rounded box like
       // Setting's Display, its button at the top over its skills.
+      // Closed, it sits where an open box's insides do, past the border and
+      // padding on both sides, so its [▼][▲] line up with an open one's.
       if (!isOpen) {
         return (
-          <Box key={`skillcat-box-${g.category}`} flexDirection="row" marginLeft={2}>
+          <Box key={`skillcat-box-${g.category}`} flexDirection="row" marginLeft={2} width={Math.max(8, (columns || OPEN.columns) - 1 - 4)}>
             {toggle}
           </Box>
         )
@@ -1260,12 +1503,13 @@ export const register: Register = on => {
       return (
         <Box key={`skillcat-box-${g.category}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
           {toggle}
-          {g.skills.slice(top, top + SKILL_ROWS).map(skill =>
+          {g.skills.slice(top, top + SKILL_ROWS).map((skill, k) =>
             skill.name === 'Respawn' && respawnAsking ? (
               // Respawn asks first: [Y] turns red under the pointer, [N] grey.
               // The question keeps its width; only the description gives way.
-              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
+              <Box key={`skill-row-${skill.name}`} flexDirection="row">
                 <Box flexDirection="row" flexShrink={0}>
+                  {down(top + k)}
                   <Text>{`[${skill.name}]: `}</Text>
                   <Button key="respawn-no" label="[N]" plain hover={{ scope: 'respawn-no', color: '#8a8a8a' }} onPress={() => update($, respawnConfirmAtom, () => false)} />
                   <Text>/</Text>
@@ -1278,13 +1522,26 @@ export const register: Register = on => {
                 )}
               </Box>
             ) : (
-              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
-                <Button
-                  key={`skill-${skill.name}`}
-                  label={`[${skill.name}]`}
-                  plain
-                  onPress={() => (skill.name === 'Respawn' ? update($, respawnConfirmAtom, () => true) : runSkill($, skill))}
-                />
+              <Box key={`skill-row-${skill.name}`} flexDirection="row">
+                {down(top + k)}
+                {g.category === COMBO_CATEGORY ? (
+                  <Button
+                    key={`combo-${skill.name}`}
+                    label={`[${skill.name}]`}
+                    plain
+                    onPress={() => {
+                      const combo = combos.find(c => c.name === skill.name)
+                      return combo && runCombo($, combo)
+                    }}
+                  />
+                ) : (
+                  <Button
+                    key={`skill-${skill.name}`}
+                    label={`[${skill.name}]`}
+                    plain
+                    onPress={() => (skill.name === 'Respawn' ? update($, respawnConfirmAtom, () => true) : runSkill($, skill))}
+                  />
+                )}
                 {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
               </Box>
             ),
@@ -1329,6 +1586,214 @@ export const register: Register = on => {
       </Box>
     )
 
+    // Skill Tree: the Party Combos, one edited at a time in a rounded box
+    // under its name. Its waves, each in a box of its own, run in order, the
+    // skills of a wave all at once, a row each; a wave moves, goes, takes
+    // another skill (+ skill lists the Skill Box's) and a condition (◆, between
+    // it and the next) the leader judges after it. Each skill's model and
+    // subagent type change a press at a time. Edits stay in a draft until [Save].
+    const treeOpen = await read($, treeOpenAtom)
+    const edits = await read($, comboEditsAtom)
+    const fresh = await read($, comboFreshAtom)
+    const tabs = [...combos.map(c => c.name), ...fresh.filter(t => !combos.some(c => c.name === t))]
+    const selTab = tabs.includes(await read($, comboSelAtom)) ? await read($, comboSelAtom) : tabs[0]
+    const shownOf = (tab: string) => edits[tab] ?? combos.find(c => c.name === tab)
+    const folded = await read($, comboFoldAtom)
+    const pickAt = await read($, comboPickAtom)
+    const condAt = await read($, comboCondAtom)
+    const renamingCombo = await read($, comboRenameAtom)
+    const comboName = await read($, comboNameAtom)
+    const deleteAsking = await read($, comboDeleteAtom)
+    const offered = await read($, agentsAtom)
+    // What an earlier load kept may hold the built-ins left out since.
+    const agents = [...DEFAULT_AGENTS, ...offered.filter(a => forSteps(a, ''))]
+    const boxWidth = Math.max(8, (columns || OPEN.columns) - 1)
+    const waveWidth = Math.max(8, boxWidth - 4)
+    // A step is a row in its wave's box: swatch, skill, model, subagent type,
+    // ✕. Where the pane is too narrow for that, the model and subagent type go
+    // under the skill instead, which leaves the subagent type the most room.
+    const waveInner = waveWidth - 4
+    const modelRoom = Math.max(...COMBO_MODELS.map(m => modelInfo(m).name.length))
+    const agentRoom = Math.max(4, waveInner - 2 - modelRoom - 1)
+    const shortAgent = (agent: string) => {
+      const name = agentLabel(agent)
+      return name.length <= agentRoom ? name : `${name.slice(0, agentRoom - 1)}…`
+    }
+    const skillNames = ownSkills.map(sk => sk.command ?? sk.name)
+    const editor = (tab: string, combo: Combo) => {
+      const edit = (fn: (c: Combo) => Combo) => editCombo($, tab, fn)
+      const dirty = edits[tab] !== undefined
+      // The name on a purple banner, bold: pressed, the box folds to it and opens again.
+      const banner = (
+        <Box flexDirection="row" gap={1}>
+          <Box flexDirection="row" backgroundColor={COMBO.banner} paddingX={1} flexShrink={1} minWidth={0}>
+            <Button key="combo-fold" label={`${folded ? '▸' : '▾'} ${combo.name}${dirty ? ' *' : ''}`} plain hover={{ scope: 'combo-fold', color: COMBO.text, bold: true }} onPress={() => update($, comboFoldAtom, f => !f)} />
+          </Box>
+          {!folded && <Button key="combo-rename" label="[Rename]" plain onPress={() => pressRename($, tab)} />}
+        </Box>
+      )
+      if (folded) {
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor={COMBO.banner} paddingX={1} width={boxWidth}>
+            {banner}
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={COMBO.banner} paddingX={1} width={boxWidth}>
+          {banner}
+          {renamingCombo && Input && (
+            <Input
+              key="combo-name"
+              label="›"
+              placeholder="new name, then [Rename]"
+              submitLabel="keep"
+              value={comboName}
+              onInput={(value: string) => update($, comboNameAtom, () => value)}
+              onSubmit={(value: string) => update($, comboNameAtom, () => value)}
+            />
+          )}
+          {combo.layers.map((layer, i) => {
+            const shownAgents = layer.steps.map(st => shortAgent(st.agent))
+            const agentWidth = Math.max(0, ...shownAgents.map(a => a.length))
+            // One wave lays its steps out alike, all a row each or all two.
+            const longestSkill = Math.max(0, ...layer.steps.map(st => st.skill.length + 1))
+            const left = skillNames.filter(name => !layer.steps.some(st => st.skill === name))
+            const condLines = layer.condition ? wrapSummary(layer.condition, waveWidth - 4, 3) : []
+            return (
+              <Box key={`wave-${i}`} flexDirection="column">
+                <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={waveWidth}>
+                  <Box flexDirection="row" columnGap={1}>
+                    <Box flexGrow={1}>
+                      <Text bold>{`Wave ${i + 1}`}</Text>
+                    </Box>
+                    <Button key={`wave-up-${i}`} label="▲" plain dimColor onPress={() => edit(c => moveLayer(c, i, -1))} />
+                    <Button key={`wave-down-${i}`} label="▼" plain dimColor onPress={() => edit(c => moveLayer(c, i, 1))} />
+                    <Button
+                      key={`wave-remove-${i}`}
+                      label="✕"
+                      plain
+                      dimColor
+                      hover={{ scope: `wave-remove-${i}`, color: hex(STOP_RED), bold: true }}
+                      onPress={async () => {
+                        await update($, comboPickAtom, () => -1)
+                        await update($, comboCondAtom, () => -1)
+                        await edit(c => removeLayer(c, i))
+                      }}
+                    />
+                  </Box>
+                  {layer.steps.map((st, j) => {
+                    const model = <Button key={`step-model-${i}-${j}`} label={modelInfo(st.model).name.padEnd(modelRoom)} plain dimColor onPress={() => edit(c => cycleModel(c, i, j))} />
+                    const agent = <Button key={`step-agent-${i}-${j}`} label={shownAgents[j]!.padEnd(agentWidth)} plain dimColor onPress={() => edit(c => cycleAgent(c, i, j, agents))} />
+                    const remove = <Button key={`step-remove-${i}-${j}`} label="✕" plain dimColor hover={{ scope: `step-remove-${i}-${j}`, color: hex(STOP_RED), bold: true }} onPress={() => edit(c => removeStep(c, i, j))} />
+                    const skill = (
+                      <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0}>
+                        <Text color={hex(modelInfo(st.model).body)}>■ </Text>
+                        <Text wrap="truncate-end">{`/${st.skill}`}</Text>
+                      </Box>
+                    )
+                    const oneRow = 2 + longestSkill + 1 + modelRoom + 1 + agentWidth + 1 + 1 <= waveInner
+                    return oneRow ? (
+                      <Box key={`step-${i}-${j}`} flexDirection="row" columnGap={1}>
+                        {skill}
+                        {model}
+                        {agent}
+                        {remove}
+                      </Box>
+                    ) : (
+                      <Box key={`step-${i}-${j}`} flexDirection="column">
+                        <Box flexDirection="row" columnGap={1}>
+                          {skill}
+                          {remove}
+                        </Box>
+                        <Box flexDirection="row" columnGap={1} marginLeft={2}>
+                          {model}
+                          {agent}
+                        </Box>
+                      </Box>
+                    )
+                  })}
+                  <Button key={`wave-add-${i}`} label="+ skill" plain dimColor onPress={() => update($, comboPickAtom, p => (p === i ? -1 : i))} />
+                  {pickAt === i && (
+                    // The Skill Box's skills not yet in this wave, side by side;
+                    // each press adds one, and the list stays until + skill again.
+                    <Box flexDirection="row" flexWrap="wrap" columnGap={1} marginLeft={2}>
+                      {skillNames.length === 0 ? (
+                        <Text dimColor wrap="truncate-end">no skills: /slime-dashboard add</Text>
+                      ) : left.length === 0 ? (
+                        <Text dimColor>all in this wave</Text>
+                      ) : (
+                        left.map(name => <Button key={`pick-${i}-${name}`} label={`/${name}`} plain onPress={() => edit(c => addStep(c, i, name))} />)
+                      )}
+                    </Box>
+                  )}
+                </Box>
+                {/* Between this wave and the next: the condition judged after it, then ↓. */}
+                <Box flexDirection="column" marginLeft={3}>
+                  {condAt === i && Input ? (
+                    <Input
+                      key={`cond-${i}`}
+                      label="◆"
+                      placeholder="e.g. if Fail, go on; if Pass, stop"
+                      submitLabel="done"
+                      value={layer.condition ?? ''}
+                      onInput={(value: string) => edit(c => setCondition(c, i, value))}
+                      onSubmit={async (value: string) => {
+                        await edit(c => setCondition(c, i, value))
+                        await update($, comboCondAtom, () => -1)
+                      }}
+                    />
+                  ) : (
+                    <Box flexDirection="column">
+                      <Button key={`wave-cond-${i}`} label={`◆ ${condLines[0] ?? '+ condition'}`} plain dimColor onPress={() => update($, comboCondAtom, p => (p === i ? -1 : i))} />
+                      {condLines.slice(1).map((line, k) => (
+                        <Text key={`cond-text-${i}-${k}`} dimColor>{`  ${line}`}</Text>
+                      ))}
+                    </Box>
+                  )}
+                  {i < combo.layers.length - 1 && <Text dimColor>↓</Text>}
+                </Box>
+              </Box>
+            )
+          })}
+          <Button key="wave-new" label="+ Wave" plain dimColor onPress={() => edit(addLayer)} />
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+            {/* Plain at rest: [Save] turns green under the pointer, [Delete] red. */}
+            <Button key="combo-save" label="[Save]" plain hover={{ scope: 'combo-save', color: COMBO.save, bold: true }} onPress={() => saveCombo($, tab)} />
+            {deleteAsking ? (
+              <Box flexDirection="row" flexShrink={0}>
+                <Text>[Delete </Text>
+                <Button key="combo-delete-yes" label="[Y]" plain hover={{ scope: 'combo-delete-yes', color: RESPAWN_RED, bold: true }} onPress={() => deleteCombo($, tab)} />
+                <Text>/</Text>
+                <Button key="combo-delete-no" label="[N]" plain hover={{ scope: 'combo-delete-no', color: '#8a8a8a' }} onPress={() => update($, comboDeleteAtom, () => false)} />
+                <Text>]</Text>
+              </Box>
+            ) : (
+              <Button key="combo-delete" label="[Delete]" plain hover={{ scope: 'combo-delete', color: RESPAWN_RED, bold: true }} onPress={() => update($, comboDeleteAtom, () => true)} />
+            )}
+          </Box>
+        </Box>
+      )
+    }
+    const selCombo = selTab === undefined ? undefined : shownOf(selTab)
+    const tree = (
+      <Box flexDirection="column">
+        {rule}
+        {header(treeOpen ? 'Skill Tree' : `Skill Tree (${combos.length})`, 'tree-toggle', treeOpen, () => update($, treeOpenAtom, o => !o))}
+        {treeOpen && (
+          <Box flexDirection="column">
+            <Box flexDirection="row" flexWrap="wrap" marginLeft={1}>
+              {tabs.map(tab => (
+                <Button key={`combo-tab-${tab}`} label={`[${shownOf(tab)?.name ?? tab}${edits[tab] ? '*' : ''}]`} plain dimColor={tab !== selTab} onPress={() => selectCombo($, tab)} />
+              ))}
+              <Button key="combo-new" label="[+New]" plain onPress={() => newCombo($)} />
+            </Box>
+            {selTab !== undefined && selCombo && editor(selTab, selCombo)}
+          </Box>
+        )}
+      </Box>
+    )
+
     // Only surfaces without the scene need the model and status spelled out.
     const line = (
       <Text>
@@ -1352,13 +1817,39 @@ export const register: Register = on => {
     const title = await read($, sessionTitleAtom)
     const renaming = await read($, renameOpenAtom)
     const draft = await read($, renameDraftAtom)
+    const sessionsOpen = await read($, sessionsOpenAtom)
+    const recent = await read($, recentSessionsAtom)
+    const now = sessionsOpen ? await $.clock.now() : 0
     // The session's name on a wooden sign: a rounded brown frame; the name is
     // a button that opens a field to rename it, then renames on a second press.
+    // [≡] at its left lists the recent sessions under it, a press resuming one.
+    const signWidth = Math.max(8, (columns || OPEN.columns) - 1)
     const session = (
       <Box flexDirection="column">
-        <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
-          <Button key="sign" label={title || '—'} plain hover={{ scope: 'sign', color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+        <Box flexDirection="row" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={signWidth}>
+          <Button key="sessions" label="[≡]" plain hover={{ scope: 'sessions', color: SIGN.text, bold: true }} onPress={() => pressSessions($)} />
+          {/* The name stays centered: the [≡]'s width again on the right. */}
+          <Box flexDirection="row" justifyContent="center" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Button key="sign" label={title || '—'} plain hover={{ scope: 'sign', color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+          </Box>
+          <Box width={3} flexShrink={0} />
         </Box>
+        {sessionsOpen && (
+          <Box flexDirection="column" borderStyle="round" borderColor={SIGN.edge} paddingX={1} width={signWidth}>
+            {recent.length === 0 ? (
+              <Text dimColor>no other sessions here</Text>
+            ) : (
+              recent.map(s => (
+                <Box key={`session-row-${s.id}`} flexDirection="row" columnGap={1}>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                    <Button key={`session-${s.id}`} label={s.title} plain hover={{ scope: `session-${s.id}`, color: SIGN.text, bold: true }} onPress={() => resumeSession($, s)} />
+                  </Box>
+                  <Text dimColor>{agoText(s.at, now)}</Text>
+                </Box>
+              ))
+            )}
+          </Box>
+        )}
         {renaming && Input && (
           <Box flexDirection="row">
             <Input
@@ -1375,7 +1866,7 @@ export const register: Register = on => {
         )}
       </Box>
     )
-    const rest = { session, stats, models: picker, property, skills: skillBox, monitor, events: eventMessage }
+    const rest = { session, stats, models: picker, property, skills: skillBox, tree, monitor, events: eventMessage }
 
     if (e.surface === 'terminal') {
       const { Raster } = $.ui.resolve(e)

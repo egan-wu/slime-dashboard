@@ -47,3 +47,35 @@ export function parseAdd(args: string): Skill | undefined {
   const [, name, category, description] = m
   return { name: name!, category: category ?? DEFAULT_CATEGORY, ...(description ? { description: description.trim() } : {}) }
 }
+
+// The person's own arrangement: `names` in the kept order, those it does not
+// name yet after them in their own order.
+export function arranged<T>(items: readonly T[], order: readonly string[] | undefined, nameOf: (item: T) => string): T[] {
+  const at = (item: T) => {
+    const i = order?.indexOf(nameOf(item)) ?? -1
+    return i < 0 ? Infinity : i
+  }
+  return items
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => at(a.item) - at(b.item) || a.i - b.i)
+    .map(x => x.item)
+}
+
+// The names with the one at `at` swapped with the next (or the one before,
+// `by` -1); at either end they stay as they are.
+export function swapNames(names: readonly string[], at: number, by: -1 | 1 = 1): string[] {
+  const to = at + by
+  if (at < 0 || to < 0 || to >= names.length) return [...names]
+  const next = [...names]
+  next[at] = names[to]!
+  next[to] = names[at]!
+  return next
+}
+
+// A kept arrangement read back: per category, its names; or the categories.
+export const namesFrom = (kept: unknown): string[] =>
+  Array.isArray(kept) ? kept.filter((n): n is string => typeof n === 'string') : []
+export function orderMapFrom(kept: unknown): Record<string, string[]> {
+  if (!kept || typeof kept !== 'object' || Array.isArray(kept)) return {}
+  return Object.fromEntries(Object.entries(kept as Record<string, unknown>).map(([k, v]) => [k, namesFrom(v)]))
+}
