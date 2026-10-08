@@ -44,7 +44,8 @@ export type Eyes = 'x' | '><' | 'TT'
 export type Potion = 'hp' | 'mp'
 // `unloading`: the context is compacting; the slime wakes and a flashing
 // ring with a sack and a green down arrow stands where the potions do.
-export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[]; unloading?: boolean }
+// `respawn`: ticks since the Skill Box's Respawn cleared the session.
+export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[]; unloading?: boolean; respawn?: number }
 
 // Down: it stops with crossed-out eyes. Walking with a full head: squinting
 // from 50%, a vein beside its head from 70%, in tears from 90%.

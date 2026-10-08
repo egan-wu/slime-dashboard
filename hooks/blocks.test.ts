@@ -117,7 +117,7 @@ test('General holds Unload, which runs /compact; the CP bar is no button', async
     // A category closes to its title and count, and opens again.
     await ui.press({ key: 'skillcat-General' })
     expect(await ui.find({ key: 'skill-Unload' })).toBeUndefined()
-    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▲ General (1)')
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▲ General (2)')
     await ui.press({ key: 'skillcat-General' })
     await ui.press({ key: 'skills-toggle' })
     await ui.unmount()
@@ -131,7 +131,7 @@ test('skills file under a category with a dim description; old plain names read 
   const manage = (args: string) =>
     $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   expect((await manage('add lint --category Code --desc run the linter')).text).toBe('Skill Box: added /lint under Code (1 registered).')
-  expect((await manage('list')).text).toBe('General: /compact (Unload)\nCode: /lint')
+  expect((await manage('list')).text).toBe('General: /compact (Unload) /clear (Respawn)\nCode: /lint')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'skills-toggle' })
   expect((await ui.find({ key: 'skillcat-Code' }))?.text).toBe('▼ Code')
@@ -322,7 +322,7 @@ test('parseAdd and grouped: categories in order, General first with Unload', asy
   expect(parseAdd('')).toBeUndefined()
   expect(skillsFrom(['timer'])).toEqual([{ name: 'timer', category: 'General' }])
   const groups = grouped([{ name: 'lint', category: 'Code' }, { name: 'timer', category: 'General' }])
-  expect(groups.map(g => [g.category, g.skills.map(s => s.name)])).toEqual([['General', ['Unload', 'timer']], ['Code', ['lint']]])
+  expect(groups.map(g => [g.category, g.skills.map(s => s.name)])).toEqual([['General', ['Unload', 'Respawn', 'timer']], ['Code', ['lint']]])
 })
 
 test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a failure says why', async ($, on) => {
@@ -575,5 +575,56 @@ test('the sign renames the session: press, type, press again; empty, unchanged o
   expect((await ui.find({ type: 'Button', key: 'sign' }))?.props).toMatchObject({ label: 'new name' })
   await ui.press({ key: 'events-toggle' })
   expect((await ui.findAll({ type: 'Text' })).some(t => t.text?.includes('Renamed: old name → new name'))).toBe(true)
+  await ui.unmount()
+})
+
+test('Respawn asks first: [N]/[Y]; [Y] runs /clear, [N] backs out', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  on('ui.toast', async () => ({ value: undefined }) as never)
+  const cleared: string[] = []
+  on('command.run', { command: 'clear' }, async (_$, e) => {
+    cleared.push(e.args)
+    return { text: '' }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  await ui.press({ key: 'skill-Respawn' })
+  expect(await ui.find({ type: 'Button', key: 'respawn-yes' })).toBeDefined()
+  // [N] first, then [Y]. (Their hover colors, red and grey, are the
+  // surface's to apply and do not show in a mounted drawing.)
+  expect((await ui.find({ type: 'Button', key: 'respawn-yes' }))?.text).toBe('[Y]')
+  expect((await ui.find({ type: 'Button', key: 'respawn-no' }))?.text).toBe('[N]')
+  const order = (await ui.findAll({ type: 'Button' })).map(b => b.key)
+  expect(order.indexOf('respawn-no')).toBeLessThan(order.indexOf('respawn-yes'))
+  await ui.press({ key: 'respawn-no' })
+  expect(await ui.find({ type: 'Button', key: 'respawn-yes' })).toBeUndefined()
+  expect(cleared).toEqual([])
+  await ui.press({ key: 'skill-Respawn' })
+  await ui.press({ key: 'respawn-yes' })
+  expect(cleared).toEqual([''])
+  expect(await ui.find({ type: 'Button', key: 'skill-Respawn' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Setting: Performance picks High, Mid or Low, the current one bright', async ($, on) => {
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'settings-toggle' })
+  const dim = async (key: string) => (await ui.find({ type: 'Button', key }))?.props.dimColor
+  // Closed it says what it is; [Perf] opens the levels, picking one closes them.
+  expect(await ui.find({ type: 'Button', key: 'perf-high' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text === ': animation effect')).toBe(true)
+  await ui.press({ key: 'perf' })
+  expect(await dim('perf-high')).toBe(false)
+  expect(await dim('perf-low')).toBe(true)
+  await ui.press({ key: 'perf-low' })
+  expect(await ui.find({ type: 'Button', key: 'perf-low' })).toBeUndefined()
+  await ui.press({ key: 'perf' })
+  expect(await dim('perf-low')).toBe(false)
+  expect(await dim('perf-high')).toBe(true)
+  await ui.press({ key: 'perf-high' })
+  await ui.press({ key: 'perf' })
+  expect(await dim('perf-high')).toBe(false)
   await ui.unmount()
 })

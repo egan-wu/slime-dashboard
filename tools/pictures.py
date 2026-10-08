@@ -146,6 +146,7 @@ def skills_rows():
         ('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP),
         [run('▼ General')],
         ('frame', [[run('[Unload]'), run(': compact context window', DIM)],
+                   [run('[Respawn]'), run(': create new session', DIM)],
                    [run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
         [run('▲ Code (1)')],
     )
@@ -182,6 +183,7 @@ def setting_rows():
         [run('  [Color]'), run(': slime colors', DIM)],
         [run('  [Order]'), run(': arrange sections', DIM)],
         [run('  [Width] [-] 33 [+]'), run(': panel width', DIM)],
+        [run('  [Performance]'), run(': animation effect', DIM)],
         [run('  [Reload]'), run(': reload dashboard', DIM)],
     ) + [(version(), None)]
 

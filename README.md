@@ -49,6 +49,7 @@ Below them: the cache hit rate, the tokens used, the iterations, and the latest 
 | Prompt for skill | Type here; the next skill you press is sent with it. Enter keeps the text, it does not send. |
 | `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
+| `[Respawn]` | Built in: starts a new session (`/clear`), once confirmed. Pressed, its row asks `[Respawn]: [N]/[Y]`; `[N]` (grey under the pointer) backs out, `[Y]` (red under the pointer) clears. The old slime hops twice and leaps off to the right, turning half over; a great beam of light comes down in the middle of the scene, a ring of light runs out along the ground, glowing motes scatter, and a new slime takes shape in the beam, glints, pauses a second, then crawls to its place. |
 
 Skills are added with `/slime-dashboard add` (see [Usage](#usage)).
 
@@ -62,7 +63,7 @@ The subagents at work, each its model in its color and the few words its task wa
 
 <img src="docs/events.png" width="340" alt="Event Message open: three framed events, a subagent finished, one stopped and one started">
 
-The newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started, finished or stopped, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, an update. Twenty are kept.
+The newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started, finished or stopped, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, a respawn, a rename, an update. Twenty are kept.
 
 ## Setting
 
@@ -75,6 +76,7 @@ The newest three events, each framed, with this computer's local time (`YYYYMMDD
 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and Party, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
+| `[Performance]` | How much the scene draws, kept across sessions. Pressed, a rounded box opens with `[High][Mid][Low]`, the current one bright; picking one closes it. High draws everything. Mid draws about 30% fewer things along the way (trees, rocks, goo, clouds, birds) and half of Unload's spray and Respawn's motes; Low about half the things and 30% of the spray and motes. |
 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
 
 The plugin's version shows at the pane's foot.

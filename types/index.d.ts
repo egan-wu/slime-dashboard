@@ -26,6 +26,9 @@ declare module 'claude-code' {
       sessionTitle: string
       renameOpen: boolean
       renameDraft: string
+      respawnConfirm: boolean
+      performance: 'high' | 'mid' | 'low'
+      perfOpen: boolean
       waiting: boolean
       skills: SlimeSkill[]
       skillsOpen: boolean

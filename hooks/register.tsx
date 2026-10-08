@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
-import { ASK, bubbleCell, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, ROWS, setColors, slotOf, step } from './scene'
-import type { Family, SlimeColors } from './scene'
+import { ASK, bubbleCell, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, PERF_LEVELS, perfFrom, respawnLength, ROWS, setColors, setPerformance, slotOf, step } from './scene'
+import type { Family, Perf, SlimeColors } from './scene'
 import type { Offsets } from './scene'
 import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
 import type { SlimeEvent } from './events'
@@ -61,6 +61,12 @@ const sessionTitleAtom = atom({ plugin: 'slime-dashboard', key: 'sessionTitle' }
 // Pressing the sign opens a field under it for a new name (renameDraft).
 const renameOpenAtom = atom({ plugin: 'slime-dashboard', key: 'renameOpen' } as const, false)
 const renameDraftAtom = atom({ plugin: 'slime-dashboard', key: 'renameDraft' } as const, '')
+// The Skill Box's Respawn asks first: its row turns into [Y]/[N].
+const respawnConfirmAtom = atom({ plugin: 'slime-dashboard', key: 'respawnConfirm' } as const, false)
+// The tick Respawn cleared the session on, while its scene plays.
+let respawnAt: number | undefined
+const respawnTick = () => (respawnAt === undefined ? undefined : tick - respawnAt)
+const RESPAWN_RED = '#d62828'
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
 // True while the session waits on the person: a permission prompt or a question.
 const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const, false)
@@ -119,6 +125,11 @@ const HIDDEN_KEY = 'hidden'
 const COLORS_KEY = 'colors'
 const ORDER_KEY = 'order'
 const WIDTH_KEY = 'width'
+// Setting's Performance, kept across sessions.
+const PERF_KEY = 'performance'
+const perfAtom = atom({ plugin: 'slime-dashboard', key: 'performance' } as const, 'high' as Perf)
+// Whether Performance's row of levels is open; picking one closes it.
+const perfOpenAtom = atom({ plugin: 'slime-dashboard', key: 'perfOpen' } as const, false)
 // Tools whose call itself waits on the person.
 const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // Notifications that mean the person is asked: a permission dialog, an MCP elicitation.
@@ -168,6 +179,24 @@ async function pressSign($: EngineInterface) {
   await $.command.run({ command: 'rename', args: next })
   await update($, sessionTitleAtom, () => next)
   await logEvent($, `Renamed: ${old || '—'} → ${next}`)
+}
+
+// Respawn confirmed: /clear starts a new session, and the scene plays the old
+// slime leaping away and a new one coming down in a beam of light.
+async function respawn($: EngineInterface) {
+  await update($, respawnConfirmAtom, () => false)
+  $.ui.toast('Skill Box: sending /clear')
+  try {
+    await $.command.run({ command: 'clear', args: '' })
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error)
+    $.ui.toast(`Skill Box: /clear did not run: ${why}`)
+    await logEvent($, 'Skill did not run: /clear')
+    return
+  }
+  respawnAt = tick
+  await update($, sessionTitleAtom, () => '')
+  await logEvent($, 'Respawned: a new session')
 }
 
 async function setSessionTitle($: EngineInterface, title: string | undefined) {
@@ -252,6 +281,14 @@ async function toggleSection($: EngineInterface, id: string) {
 // Open the pane, asking for the width Setting's Width chose.
 async function openPane($: EngineInterface) {
   return $.ui.open({ ...OPEN, columns: await read($, widthAtom) })
+}
+
+// Setting's Performance: how much the scene draws, kept.
+async function setPerf($: EngineInterface, level: Perf) {
+  setPerformance(level)
+  await update($, perfAtom, () => level)
+  await update($, perfOpenAtom, () => false)
+  await $.store.set(PERF_KEY, level)
 }
 
 // Setting's Width: a column narrower or wider, kept, and the pane reopened at it.
@@ -396,9 +433,13 @@ async function refreshWeather($: EngineInterface): Promise<string> {
   return `Weather: could not read wttr.in (${why}); the sky stays as it was and tries again in two minutes.`
 }
 
+// A session between models (as /clear passes) names none for a moment: the
+// slime keeps the last one rather than flash the unknown model's green, and
+// keeps it through Respawn's scene.
 async function refreshModel($: EngineInterface) {
+  if (respawnAt !== undefined) return
   const current = await $.session.model()
-  if (current === model) return
+  if (!current || current === model) return
   if (model !== '') await logEvent($, `Model: ${modelInfo(model).name} → ${modelInfo(current).name}`)
   model = current
   await update($, modelAtom, () => current)
@@ -597,6 +638,9 @@ export const register: Register = on => {
     const colors = colorsFrom(await $.store.get(COLORS_KEY))
     setColors(colors)
     await update($, colorsAtom, () => colors)
+    const perfKept = perfFrom(await $.store.get(PERF_KEY))
+    setPerformance(perfKept)
+    await update($, perfAtom, () => perfKept)
     // A compaction cut short by a reload is not still running.
     await update($, unloadingAtom, () => false)
     const orderKept = orderFrom(await $.store.get(ORDER_KEY))
@@ -653,7 +697,8 @@ export const register: Register = on => {
       if (tick % 10 === 5) await checkMinions($)
       if (columns > 0) {
         const walking = moving(busy, minions)
-        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting, unloading }
+        if ((respawnTick() ?? 0) >= respawnLength(columns)) respawnAt = undefined
+        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting, unloading, respawn: respawnTick() }
         const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, face)
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
@@ -801,6 +846,9 @@ export const register: Register = on => {
     const isUnloading = await read($, unloadingAtom)
     const colors = await read($, colorsAtom)
     setColors(colors)
+    const perfLevel = await read($, perfAtom)
+    setPerformance(perfLevel)
+    const perfOpen = await read($, perfOpenAtom)
     const colorOpen = await read($, colorOpenAtom)
     const info = modelInfo(current)
     const status = isBusy ? '▸' : 'z'
@@ -871,7 +919,7 @@ export const register: Register = on => {
                     key={`stop-${m.id}`}
                     label="x"
                     plain
-                    hover={{ color: hex(STOP_RED), bold: true }}
+                    hover={{ scope: `stop-${m.id}`, color: hex(STOP_RED), bold: true }}
                     onPress={() => stopMinion($, m.id)}
                   />
                   <Text color={hex(STOP_RED)}>]</Text>
@@ -982,6 +1030,29 @@ export const register: Register = on => {
               <Button key="width-up" label="[+]" plain dimColor={paneColumns >= MAX_COLUMNS} onPress={() => nudgeWidth($, 1)} />
               <Text dimColor>: panel width</Text>
             </Box>
+            {/* Performance: closed, what it is; open, a rounded box with its
+                levels on the second row, the current one bright. */}
+            {perfOpen ? (
+              <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginLeft={1} width={Math.max(8, (columns || OPEN.columns) - 2)}>
+                <Button key="perf" label="[Performance]" plain onPress={() => update($, perfOpenAtom, o => !o)} />
+                <Box key="perf-levels" flexDirection="row" flexShrink={0}>
+                  {PERF_LEVELS.map(level => (
+                    <Button
+                      key={`perf-${level}`}
+                      label={`[${level[0]!.toUpperCase()}${level.slice(1)}]`}
+                      plain
+                      dimColor={level !== perfLevel}
+                      onPress={() => setPerf($, level)}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            ) : (
+              <Box flexDirection="row" marginLeft={2}>
+                <Button key="perf" label="[Performance]" plain onPress={() => update($, perfOpenAtom, o => !o)} />
+                <Text dimColor>: animation effect</Text>
+              </Box>
+            )}
             <Box flexDirection="row" marginLeft={2}>
               <Button key="reload" label="[Reload]" plain onPress={() => reloadDashboard($)} />
               <Text dimColor>: reload dashboard</Text>
@@ -1165,6 +1236,7 @@ export const register: Register = on => {
       }))
     const toggleCategory = (category: string) =>
       update($, skillCatsClosedAtom, c => (c.includes(category) ? c.filter(x => x !== category) : [...c, category]))
+    const respawnAsking = await read($, respawnConfirmAtom)
     const categories = groups.map(g => {
       const isOpen = !closed.includes(g.category)
       const top = topOf(g)
@@ -1188,12 +1260,35 @@ export const register: Register = on => {
       return (
         <Box key={`skillcat-box-${g.category}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
           {toggle}
-          {g.skills.slice(top, top + SKILL_ROWS).map(skill => (
-            <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
-              <Button key={`skill-${skill.name}`} label={`[${skill.name}]`} plain onPress={() => runSkill($, skill)} />
-              {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
-            </Box>
-          ))}
+          {g.skills.slice(top, top + SKILL_ROWS).map(skill =>
+            skill.name === 'Respawn' && respawnAsking ? (
+              // Respawn asks first: [Y] turns red under the pointer, [N] grey.
+              // The question keeps its width; only the description gives way.
+              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
+                <Box flexDirection="row" flexShrink={0}>
+                  <Text>{`[${skill.name}]: `}</Text>
+                  <Button key="respawn-no" label="[N]" plain hover={{ scope: 'respawn-no', color: '#8a8a8a' }} onPress={() => update($, respawnConfirmAtom, () => false)} />
+                  <Text>/</Text>
+                  <Button key="respawn-yes" label="[Y]" plain hover={{ scope: 'respawn-yes', color: RESPAWN_RED, bold: true }} onPress={() => respawn($)} />
+                </Box>
+                {skill.description && (
+                  <Box flexShrink={1} minWidth={0} overflow="hidden">
+                    <Text dimColor wrap="truncate-end">{` ${skill.description}`}</Text>
+                  </Box>
+                )}
+              </Box>
+            ) : (
+              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
+                <Button
+                  key={`skill-${skill.name}`}
+                  label={`[${skill.name}]`}
+                  plain
+                  onPress={() => (skill.name === 'Respawn' ? update($, respawnConfirmAtom, () => true) : runSkill($, skill))}
+                />
+                {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
+              </Box>
+            ),
+          )}
           {g.skills.length > SKILL_ROWS && (
             <Box flexDirection="row" gap={1} marginLeft={2}>
               <Button key={`skills-up-${g.category}`} label="▲" plain onPress={() => scroll(g, -1)} />
@@ -1262,7 +1357,7 @@ export const register: Register = on => {
     const session = (
       <Box flexDirection="column">
         <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
-          <Button key="sign" label={title || '—'} plain hover={{ color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+          <Button key="sign" label={title || '—'} plain hover={{ scope: 'sign', color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
         </Box>
         {renaming && Input && (
           <Box flexDirection="row">
@@ -1287,7 +1382,7 @@ export const register: Register = on => {
       columns = Math.max(1, Math.min(512, e.props.bodyColumns))
       const scene = (
         <Box flexDirection="column">
-          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading })} />
+          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading, respawn: respawnTick() })} />
           {isWaiting && (
             // The bubble's question mark, bold, laid over its middle cell.
             <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>

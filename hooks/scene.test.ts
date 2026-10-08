@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EMERGE_TICKS, frame, GOO_COLORS, goos, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
+import { EMERGE_TICKS, frame, setPerformance, RESPAWN, RESPAWN_COLORS, respawnLength, GOO_COLORS, goos, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
 import type { Offsets } from './scene'
 import { parseWeather, weatherNow } from './weather'
 
@@ -209,4 +209,80 @@ test('the opening scene has a tall oval green tree left of the autumn tree, gone
   }
   expect(green(fresh())).toBeGreaterThan(20)
   expect(green({ ...fresh(), tree: 200, rock: 200, ground: 200 })).toBe(0)
+})
+
+test('Respawn: the old slime leaps off right, a beam comes down, motes scatter, a new slime stands', () => {
+  const W = 33
+  const look = (t: number) => {
+    const words = new Uint32Array(Uint8Array.from(atob(frame(W, fresh(), 0, false, 'claude-opus-5-5', [], { day: false, sky: 'cloudy' }, undefined, { respawn: t })), c => c.charCodeAt(0)).buffer)
+    let white = 0
+    let topWhite = false
+    for (let i = 0; i < words.length; i += 3) {
+      for (const k of [1, 2]) if (words[i + k] === RESPAWN_COLORS.white) {
+        white++
+        if (i / 3 < W) topWhite = true
+      }
+    }
+    const chars = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) chars.add(words[i]!)
+    return { white, topWhite, asleep: chars.has('z'.codePointAt(0)!) }
+  }
+  expect(look(0).white).toBe(0)
+  // The beam reaches down from the top of the sky.
+  expect(look(RESPAWN.beam + 2).topWhite).toBe(true)
+  expect(look(RESPAWN.beam + 5).white).toBeGreaterThan(20)
+  expect(look(respawnLength(W) - 1).topWhite).toBe(false)
+  // Throughout, the slime is never asleep.
+  expect(look(RESPAWN.born + 6).asleep).toBe(false)
+})
+
+test('Respawn: the beam comes down mid-scene; the new slime walks right to its place', () => {
+  const W = 33
+  // Columns holding the new slime's body color (Opus red) on the ground row.
+  const slimeCols = (t: number) => {
+    const words = new Uint32Array(Uint8Array.from(atob(frame(W, { cloud: 0, bird: 0, tree: 200, rock: 200, ground: 0 }, 0, false, 'claude-opus-5-5', [], { day: false, sky: 'cloudy' }, undefined, { respawn: t })), c => c.charCodeAt(0)).buffer)
+    const row = 5 // the cell row over the ground line
+    const cols: number[] = []
+    for (let c = 0; c < W; c++) {
+      const i = (row * W + c) * 3
+      if (words[i + 1] === 0xa4161a || words[i + 2] === 0xa4161a || words[i + 1] === 0xe5383b || words[i + 2] === 0xe5383b) cols.push(c)
+    }
+    return cols
+  }
+  const at = (t: number) => Math.min(...slimeCols(t))
+  const shaped = RESPAWN.born + 10
+  expect(at(shaped)).toBeLessThan(18)
+  expect(at(respawnLength(W) - 1)).toBeGreaterThan(at(shaped))
+})
+
+test('Performance: Mid and Low thin the things along the way and the effects', () => {
+  const things = () => goos(0, 4000).length + scattered('tree', 0, 4000).length + scattered('rock', 0, 4000).length
+  // Motes over the 2.4 s after the strike, away from the beam itself.
+  const motes = () => {
+    let n = 0
+    for (let t = RESPAWN.beam + 6; t < RESPAWN.beam + 30; t++) {
+      const words = new Uint32Array(Uint8Array.from(atob(frame(80, { cloud: 0, bird: 0, tree: 999, rock: 999, ground: 0 }, 0, false, 'claude-opus-5-5', [], { day: false, sky: 'cloudy' }, undefined, { respawn: t })), c => c.charCodeAt(0)).buffer)
+      for (let i = 0; i < words.length; i += 3) {
+        // Away from the beam, and above the ring running along the ground.
+        if (Math.abs(((i / 3) % 80) - 40) <= 3 || i / 3 >= 80 * 4) continue
+        for (const k of [1, 2]) if (words[i + k] === RESPAWN_COLORS.white || words[i + k] === RESPAWN_COLORS.gold) n++
+      }
+    }
+    return n
+  }
+  try {
+    setPerformance('high')
+    const all = things()
+    const allMotes = motes()
+    setPerformance('mid')
+    expect(things() / all).toBeGreaterThan(0.6)
+    expect(things() / all).toBeLessThan(0.8)
+    expect(motes()).toBeLessThan(allMotes * 0.7)
+    setPerformance('low')
+    expect(things() / all).toBeGreaterThan(0.4)
+    expect(things() / all).toBeLessThan(0.6)
+    expect(motes()).toBeLessThan(allMotes * 0.45)
+  } finally {
+    setPerformance('high')
+  }
 })

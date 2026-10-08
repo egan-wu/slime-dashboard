@@ -11,9 +11,11 @@ export type Skill = {
 
 export const DEFAULT_CATEGORY = 'General'
 
-// Always in the box, ahead of the person's own: Unload compacts the context.
+// Always in the box, ahead of the person's own: Unload compacts the context;
+// Respawn starts a new session (/clear), once confirmed.
 export const BUILT_IN: readonly Skill[] = [
   { name: 'Unload', category: DEFAULT_CATEGORY, description: 'compact context window', command: 'compact' },
+  { name: 'Respawn', category: DEFAULT_CATEGORY, description: 'create new session', command: 'clear' },
 ]
 
 // What the store held before categories (plain names) reads as General skills.

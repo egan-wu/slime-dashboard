@@ -178,6 +178,7 @@ export function scattered(layer: 'tree' | 'rock', from: number, to: number): num
   const found: number[] = []
   for (let k = Math.floor(from / sc.span) - 1; k * sc.span < to; k++) {
     if (Math.floor(unit(k, sc.seed) * sc.skip) === 0) continue
+    if (!thingKept(k, sc.seed)) continue
     const x = k * sc.span + Math.floor(unit(k, sc.seed * 3 + 1) * sc.jitter)
     if (x >= from && x < to) found.push(x)
   }
@@ -202,6 +203,7 @@ export function goos(from: number, to: number): number[] {
   const found: number[] = []
   for (let k = Math.floor(from / sc.span) - 1; k * sc.span < to; k++) {
     if (Math.floor(unit(k, sc.seed) * sc.skip) === 0) continue
+    if (!thingKept(k, sc.seed)) continue
     const x = k * sc.span + Math.floor(unit(k, sc.seed * 3 + 1) * sc.jitter)
     if (x < from || x >= to) continue
     // Clear of rocks ahead, and far enough past one behind that the slime has
@@ -419,6 +421,40 @@ export const POTION_COLORS = {
   mp: { O: 0xe8e8f0, k: 0x9c6644, p: 0x3a86ff, P: 0x8fbcff },
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
+// Respawn's beats, in ticks: two hops then the leap off to the right (until
+// `beam`), the beam coming down, the ring along the ground (`wave` ticks),
+// the motes (`motes` ticks from the strike), the new slime taking shape in
+// the middle (`born`), the beam narrowing away from `fade`, the new slime
+// setting off for its place (`walk`: a second after its glow has faded).
+// Setting's Performance: High draws everything; Mid and Low thin the
+// effects (Unload's spray, Respawn's motes) and the things along the way
+// (trees, rocks, goo, clouds, birds).
+export const PERF_LEVELS = ['high', 'mid', 'low'] as const
+export type Perf = (typeof PERF_LEVELS)[number]
+export const PERF = { high: { fx: 1, things: 1 }, mid: { fx: 0.5, things: 0.7 }, low: { fx: 0.3, things: 0.5 } } as const
+let perf: Perf = 'high'
+export function setPerformance(level: Perf): void {
+  perf = level
+}
+export const perfFrom = (value: unknown): Perf => (PERF_LEVELS.includes(value as Perf) ? (value as Perf) : 'high')
+// Whether the i-th of a run is kept when `keep` of them are, spread evenly.
+const kept = (i: number, keep: number) => Math.floor((i + 1) * keep) > Math.floor(i * keep)
+// Whether the thing at index k of a scattered run is kept, at random but steady.
+const thingKept = (k: number, seed: number) => unit(k, seed * 7 + 3) < PERF[perf].things
+
+export const RESPAWN = { leap: 12, beam: 26, wave: 8, motes: 30, born: 33, fade: 46, walk: 53, moteCount: 26 }
+const WALK_SPEED = 0.8
+// How long Respawn plays in a scene `columns` wide: until the new slime,
+// born in the middle, has crawled to its place, and a beat more.
+export function respawnLength(columns: number): number {
+  const w = Math.max(1, Math.min(512, columns))
+  const walk = Math.max(0, Math.max(6, w - 8) - (w >> 1))
+  return Math.max(RESPAWN.beam + 4 + RESPAWN.motes, RESPAWN.walk + Math.ceil(walk / WALK_SPEED) + 4)
+}
+// A sprite turned a quarter (clockwise) and a half over, for the leap.
+const quarterTurn = (rows: string[]) => [...rows[0]!].map((_, x) => rows.map(r => r[x]!).reverse().join(''))
+const halfTurn = (rows: string[]) => rows.map(r => [...r].reverse().join('')).reverse()
+export const RESPAWN_COLORS = { white: 0xfffbe8, gold: 0xffd23f }
 // Unloading (the context compacting): the slime sets its load down. Every
 // few ticks its body flashes white and it spits a spray of the goo it ate out
 // of its back, which arc off to the left, land and vanish; green arrows fall
@@ -536,7 +572,8 @@ export function frame(
   for (const band of BANDS) {
     if (band.layer === 'bird' && !birds) continue
     const shift = Math.floor(off[band.layer]) % band.span
-    for (const item of band.items) {
+    const shown = perf === 'high' ? band.items : band.items.slice(0, Math.max(1, Math.floor(band.items.length * PERF[perf].things)))
+    for (const item of shown) {
       if (item.sparse && weather.sky === 'clear') continue
       if (item.overcast && !overcast) continue
       for (let t = 0; item.x + t * band.span - shift < w; t++) {
@@ -666,7 +703,83 @@ export function frame(
 
   const info = modelInfo(model)
   const tint = tintOf(model)
-  if (fete && !fete.scrolling) {
+  if (face.respawn !== undefined) {
+    // Respawn: the old slime hops twice on the spot, then leaps off to the
+    // right turning half over; a great beam of light comes down where it
+    // stood, a ring of light runs out along the ground, glowing motes
+    // scatter, and a new slime takes shape in the beam, top row first,
+    // glinting as the light fades.
+    const t = face.respawn
+    const R = RESPAWN
+    const home = cx - (SLIME.awake[0]!.length >> 1)
+    if (t < R.leap) {
+      const hop = R.leap / 2
+      const lift = Math.round(2 * Math.sin((Math.PI * (t % hop)) / hop))
+      draw({ rows: lift > 0 ? SLIME.air : SLIME.awake, colors: tint }, home, GROUND_Y - 1 - lift)
+    } else if (t < R.beam) {
+      const k = (t - R.leap) / (R.beam - R.leap)
+      const lift = Math.round(6 * Math.sin(Math.PI * Math.min(1, k * 1.4)))
+      const rows = k < 1 / 3 ? SLIME.air : k < 2 / 3 ? quarterTurn(SLIME.air) : halfTurn(SLIME.air)
+      draw({ rows, colors: tint }, home + Math.round((t - R.leap) * 1.8), GROUND_Y - 1 - lift)
+    }
+    // The light comes down in the middle of the scene.
+    const mid = w >> 1
+    const born = mid - (SLIME.awake[0]!.length >> 1)
+    const landed = R.beam + Math.ceil(GROUND_Y / 3)
+    if (t >= R.beam && t < R.fade + 6) {
+      const reach = Math.min(GROUND_Y, (t - R.beam) * 3)
+      const narrowing = Math.max(0, t - R.fade)
+      const half = Math.max(0, 2 - narrowing)
+      for (let y = 0; y <= reach; y++) {
+        for (let dx = -half - 1; dx <= half + 1; dx++) {
+          const edge = Math.abs(dx) > half
+          if (edge && narrowing > 2) continue
+          put(mid + dx, y, edge ? RESPAWN_COLORS.gold : RESPAWN_COLORS.white)
+        }
+      }
+    }
+    // Where the beam strikes, a ring of light runs out both ways along the ground.
+    if (t >= landed && t < landed + R.wave) {
+      const r = 3 + (t - landed) * 2
+      for (const side of [-1, 1]) {
+        put(mid + side * r, GROUND_Y - 1, RESPAWN_COLORS.white)
+        put(mid + side * (r - 1), GROUND_Y - 1, RESPAWN_COLORS.gold)
+        put(mid + side * (r - 1), GROUND_Y - 2, RESPAWN_COLORS.gold)
+      }
+    }
+    if (t >= landed && t < landed + R.motes) {
+      const age = t - landed
+      for (let i = 0; i < R.moteCount; i++) {
+        if (!kept(i, PERF[perf].fx)) continue
+        if ((i + t) % 5 === 0) continue
+        const vx = (unit(i, 0x5eed) - 0.5) * 1.8
+        const vy = 0.3 + unit(i, 0xbea7) * 0.8
+        const x = Math.round(mid + vx * age)
+        const y = Math.round(GROUND_Y - 3 - vy * age + 0.04 * age * age)
+        if (y < GROUND_Y) put(x, y, i % 2 === 0 ? RESPAWN_COLORS.white : RESPAWN_COLORS.gold)
+      }
+    }
+    if (t >= R.born) {
+      // Taking shape top row first, then a white glow as it settles; once
+      // whole, it crawls right to its place and stops there.
+      const shapedAt = R.born + SLIME.awake.length * 2
+      const shown = Math.min(SLIME.awake.length, Math.floor((t - R.born) / 2) + 1)
+      const walked = Math.min(home - born, Math.max(0, t - R.walk) * WALK_SPEED)
+      const x = born + Math.round(walked)
+      const walking = t >= R.walk && x < home
+      const base = walking && Math.floor(t / 2) % 2 === 0 ? SLIME.crawl : SLIME.awake
+      const rows = base.map((row, i) => (i < shown + base.length - SLIME.awake.length ? row : '.'.repeat(row.length)))
+      const glow = t < shapedAt + 4 ? { ...tint, ...UNLOAD_COLORS.glow } : tint
+      draw({ rows, colors: glow }, x, GROUND_Y - 1)
+      // Glints around it, one at a time, until it sets off.
+      if (t >= shapedAt && t < R.walk) {
+        const top = (GROUND_Y - SLIME.awake.length) >> 1
+        const spots = [{ dx: -2, row: top - 1 }, { dx: 7, row: top }, { dx: 3, row: top - 2 }, { dx: -1, row: top + 1 }]
+        const spot = spots[Math.floor(t / 3) % spots.length]!
+        if (t % 3 !== 2) overlays.push({ col: x + spot.dx, row: spot.row, ch: '✦', fg: RESPAWN_COLORS.gold })
+      }
+    }
+  } else if (fete && !fete.scrolling) {
     // Standing by the chest: still while it opens, then hopping for joy; the
     // tuft pops up for a gulp as the little one sinks in.
     const lift = fete.cheer ?? 0
@@ -701,6 +814,7 @@ export function frame(
         const spray = Math.round((tick - age) / SPIT_EVERY)
         const k = age / SPIT_FLIGHT
         SPRAY.forEach(({ far, high }, p) => {
+          if (!kept(p, PERF[perf].fx)) return
           const n = UNLOAD_COLORS.pixels.length
           const color = UNLOAD_COLORS.pixels[(((spray * SPRAY.length + p) % n) + n) % n]!
           const x = Math.round(left + 1 - far * k)
