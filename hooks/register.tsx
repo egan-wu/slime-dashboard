@@ -816,7 +816,10 @@ export const register: Register = on => {
                     <Button key={`color-${family}`} label={`[${PALETTES[colors[family]].name}]`} plain onPress={() => cycleColor($, family)} />
                   </Box>
                 ))}
-                <Button key="color-default" label="[Default]" plain onPress={() => setSlimeColors($, DEFAULT_COLORS)} />
+                {/* In the colors' column, past the swatch and the padded name. */}
+                <Box flexDirection="row" marginLeft={9}>
+                  <Button key="color-default" label="[Default]" plain onPress={() => setSlimeColors($, DEFAULT_COLORS)} />
+                </Box>
               </Box>
             ) : (
               <Box flexDirection="row" marginLeft={2}>
