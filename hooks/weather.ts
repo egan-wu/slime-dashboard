@@ -2,7 +2,9 @@
 // wttr.in (which places the machine by its IP address).
 
 export type Sky = 'clear' | 'partly' | 'cloudy' | 'rain' | 'snow'
-export type Weather = { day: boolean; sky: Sky }
+// `rise`, `set` and `at` (minutes past midnight, the place's time) and
+// `readAt` (this machine's clock) let day turn to night between reads.
+export type Weather = { day: boolean; sky: Sky; rise?: number; set?: number; at?: number; readAt?: number }
 
 // One line: weather symbol | sunrise | sunset | local time, all in the
 // place's own time, e.g. "m|05:50:42|17:38:27|19:58:04+0800".
@@ -34,6 +36,15 @@ export function parseWeather(text: string): Weather | undefined {
   const rise = minutes(sunrise)
   const set = minutes(sunset)
   const at = minutes(now)
-  const day = rise === undefined || set === undefined || at === undefined ? true : at >= rise && at < set
-  return { day, sky: skyOf(symbol) }
+  if (rise === undefined || set === undefined || at === undefined) return { day: true, sky: skyOf(symbol) }
+  return { day: at >= rise && at < set, sky: skyOf(symbol), rise, set, at }
+}
+
+// The sky read at `readAt`, with day or night moved on to `now`: the place's
+// clock then, plus the minutes gone by since.
+export function weatherNow(w: Weather, now: number): Weather {
+  if (w.rise === undefined || w.set === undefined || w.at === undefined || w.readAt === undefined) return w
+  const minute = (((w.at + Math.floor((now - w.readAt) / 60_000)) % 1440) + 1440) % 1440
+  const day = minute >= w.rise && minute < w.set
+  return day === w.day ? w : { ...w, day }
 }

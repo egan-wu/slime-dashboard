@@ -17,17 +17,16 @@ import type { Vitals } from './vitals'
 import { DEFAULT_ORDER, moveSection, orderFrom, SECTIONS } from './layout'
 import type { SectionId } from './layout'
 import { VERSION } from './version'
-import { DEFAULT_WEATHER, parseWeather, WEATHER_URL } from './weather'
+import { DEFAULT_WEATHER, parseWeather, WEATHER_URL, weatherNow } from './weather'
 import type { SlimeMinion, SlimeWeather } from '../types'
 
 const PANE = 'slime-dashboard'
 const SCENE = 'scene'
 const TICK_MS = 100
-// The sky is read every quarter hour, so day turns to night close to sunset;
-// a read that fails is tried again two minutes later.
-const WEATHER_MS = 15 * 60 * 1000
-// How often to ask GitHub whether a newer dashboard is out.
-const FRESHNESS_MS = 30 * 60 * 1000
+// The sky is read every hour; day turns to night at sunset in between, from
+// the sunrise and sunset the last read gave. A read that fails is tried
+// again two minutes later.
+const WEATHER_MS = 60 * 60 * 1000
 const WEATHER_RETRY_MS = 2 * 60 * 1000
 // Docked beside the fullscreen transcript, the sidebar asks for this width.
 const OPEN = { id: PANE, title: 'Slime', columns: 33 }
@@ -333,7 +332,8 @@ async function refreshWeather($: EngineInterface): Promise<string> {
   try {
     // wttr.in answers a browser with a page; asked as curl, with the line alone.
     const reply = await $.http.fetch(WEATHER_URL, { headers: { 'User-Agent': 'curl/8' } })
-    const next = reply.ok ? parseWeather(reply.text) : undefined
+    const read = reply.ok ? parseWeather(reply.text) : undefined
+    const next = read && { ...read, readAt: await $.clock.now() }
     if (next) {
       weather = next
       await update($, weatherAtom, () => next)
@@ -579,8 +579,9 @@ export const register: Register = on => {
     void readLocalZone($)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
+    // GitHub is asked for a newer dashboard once a load: at session start and
+    // at each reload.
     void checkFreshness($)
-    $.clock.every(FRESHNESS_MS, () => checkFreshness($))
 
     $.clock.every(TICK_MS, async () => {
       tick++
@@ -596,6 +597,14 @@ export const register: Register = on => {
       if (tick % 20 === 0) {
         await refreshModel($)
         await refreshVitals($)
+      }
+      // Once a minute, day or night moves on from the last read's sunrise and sunset.
+      if (tick % 600 === 0) {
+        const moved = weatherNow(weather, await $.clock.now())
+        if (moved !== weather) {
+          weather = moved
+          await update($, weatherAtom, () => moved)
+        }
       }
       if (tick % 10 === 5) await checkMinions($)
       if (columns > 0) {

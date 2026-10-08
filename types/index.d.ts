@@ -10,7 +10,14 @@ export type SlimeVitals = { plan: 'subscription' | 'api'; hp: number; mp: number
 // `done` once its subagent has handed back; its slime is then dropping out of line.
 // `description` is the few words the Agent call gave its task.
 export type SlimeMinion = { id: string; model: string; description?: string; done?: boolean }
-export type SlimeWeather = { day: boolean; sky: 'clear' | 'partly' | 'cloudy' | 'rain' | 'snow' }
+export type SlimeWeather = {
+  day: boolean
+  sky: 'clear' | 'partly' | 'cloudy' | 'rain' | 'snow'
+  rise?: number
+  set?: number
+  at?: number
+  readAt?: number
+}
 
 declare module 'claude-code' {
   interface PluginState {

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { EMERGE_TICKS, frame, GOO_COLORS, goos, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
 import type { Offsets } from './scene'
-import { parseWeather } from './weather'
+import { parseWeather, weatherNow } from './weather'
 
 const fresh = (): Offsets => ({ cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 })
 
@@ -60,11 +60,11 @@ test('slimes leap over rocks with one pixel to spare', async () => {
 
 test('weather: wttr.in reply to day or night and a sky', async () => {
   const reply = (symbol: string, now: string) => `${symbol}|05:50:42|17:38:27|${now}+0800\n`
-  expect(parseWeather(reply('o', '10:00:00'))).toEqual({ day: true, sky: 'clear' })
-  expect(parseWeather(reply('m', '19:58:04'))).toEqual({ day: false, sky: 'partly' })
-  expect(parseWeather(reply('mmm', '13:00:00'))).toEqual({ day: true, sky: 'cloudy' })
-  expect(parseWeather(reply('//', '12:15:00'))).toEqual({ day: true, sky: 'rain' })
-  expect(parseWeather(reply('*/*', '05:00:00'))).toEqual({ day: false, sky: 'snow' })
+  expect(parseWeather(reply('o', '10:00:00'))).toMatchObject({ day: true, sky: 'clear' })
+  expect(parseWeather(reply('m', '19:58:04'))).toMatchObject({ day: false, sky: 'partly' })
+  expect(parseWeather(reply('mmm', '13:00:00'))).toMatchObject({ day: true, sky: 'cloudy' })
+  expect(parseWeather(reply('//', '12:15:00'))).toMatchObject({ day: true, sky: 'rain' })
+  expect(parseWeather(reply('*/*', '05:00:00'))).toMatchObject({ day: false, sky: 'snow' })
   expect(parseWeather('Unknown location; please try ~40.7,-74.0')).toBe(undefined)
 })
 
@@ -188,4 +188,13 @@ test('goo: blobs lie on the road clear of rocks, and the slime gapes at and eats
   }
   expect(seen).toBe(true)
   expect(gaped).toBe(true)
+})
+
+test('between hourly reads, day turns to night at the last read sunset', () => {
+  const read = { ...parseWeather('m|05:50:42|17:38:27|17:30:00+0800')!, readAt: 0 }
+  expect(read.day).toBe(true)
+  expect(weatherNow(read, 5 * 60_000)).toBe(read)
+  expect(weatherNow(read, 10 * 60_000).day).toBe(false)
+  expect(weatherNow(read, 12 * 60 * 60_000).day).toBe(false)
+  expect(weatherNow(read, (13 * 60 + 30) * 60_000).day).toBe(true)
 })
