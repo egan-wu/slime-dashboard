@@ -368,21 +368,24 @@ export const POTION_COLORS = {
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
 // Unloading (the context compacting): the slime sets its load down. Every
-// few ticks it squashes and spits a crate out of its back, which arcs off to
-// the left, lands and sinks away; its body flashes green, and green arrows
-// fall beside it, until the compaction ends.
+// few ticks its body flashes green and it spits a spray of colored pixels out
+// of its back, which arc off to the left, land and vanish; green arrows fall
+// beside it, until the compaction ends.
 export const UNLOAD_COLORS = {
   glow: { B: 0x7ae582, H: 0xd8f8dc, M: 0xa8eeb0, D: 0x38b000 },
-  crate: { C: 0xc89f6a, c: 0x9c6644 },
+  pixels: [0xff595e, 0xff924c, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93, 0xff70a6],
   arrow: 0x38b000,
 } as const
-// Ticks between crates, crates in the air at once, and ticks each one flies.
+// Ticks between sprays, sprays in the air at once, and ticks each one flies.
 const SPIT_EVERY = 4
-const SPIT_CRATES = 3
+const SPIT_SPRAYS = 3
 const SPIT_FLIGHT = 9
-const CRATE = { air: ['CC', 'Cc'], down: ['cc'] }
-// Squashed flat as it spits.
-const SQUASH = ['DEMMED', 'DBBBBD']
+// Each pixel of a spray: how far left it lands and how high it arcs.
+const SPRAY = [
+  { far: 5, high: 5 },
+  { far: 8, high: 3 },
+  { far: 11, high: 6 },
+]
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -609,9 +612,7 @@ export function frame(
     // Standing still, nothing passes beneath it: it stays on the ground.
     const lift = travelling ? rockLift(left, width, rocks) : 0
     const unloading = face.unloading === true
-    const rows = unloading && !travelling && tick % SPIT_EVERY === 0
-      ? SQUASH
-      : !travelling
+    const rows = !travelling
       ? SLIME.awake
       : lift > 0
         ? SLIME.air
@@ -620,16 +621,24 @@ export function frame(
           : SLIME.crawl
     const bottom = GROUND_Y - 1 - lift
     if (unloading) {
-      // Drawn under the slime, so each crate comes out of its body.
-      for (let j = 0; j < SPIT_CRATES; j++) {
-        const age = (tick + j * SPIT_EVERY) % (SPIT_EVERY * SPIT_CRATES)
-        const k = Math.min(age, SPIT_FLIGHT) / SPIT_FLIGHT
-        const x = Math.round(left + 1 - 8 * k)
-        const rows = age > SPIT_FLIGHT ? CRATE.down : CRATE.air
-        draw({ rows, colors: UNLOAD_COLORS.crate }, x, GROUND_Y - 1 - Math.round(Math.sin(k * Math.PI) * 4))
+      // Drawn under the slime, so each pixel comes out of its body; a spray
+      // keeps its colors all the way down.
+      const cycle = SPIT_EVERY * SPIT_SPRAYS
+      for (let j = 0; j < SPIT_SPRAYS; j++) {
+        const age = (tick + j * SPIT_EVERY) % cycle
+        if (age > SPIT_FLIGHT) continue
+        const spray = Math.round((tick - age) / SPIT_EVERY)
+        const k = age / SPIT_FLIGHT
+        SPRAY.forEach(({ far, high }, p) => {
+          const n = UNLOAD_COLORS.pixels.length
+          const color = UNLOAD_COLORS.pixels[(((spray * SPRAY.length + p) % n) + n) % n]!
+          const x = Math.round(left + 1 - far * k)
+          draw({ rows: ['P'], colors: { P: color } }, x, bottom - 1 - Math.round(Math.sin(k * Math.PI) * high))
+        })
       }
     }
-    const glowing = unloading && Math.floor(tick / 3) % 2 === 1
+    // It flashes green as each spray leaves it.
+    const glowing = unloading && tick % SPIT_EVERY < 2
     const body = glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint
     draw({ rows, colors: body }, left, bottom)
     // The face goes over the eyes as characters, as the sleeping eyes do: a

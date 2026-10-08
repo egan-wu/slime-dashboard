@@ -67,6 +67,7 @@ test('a potion ring flashes at the main slime\'s upper left', async () => {
     const cells = frame(30, off(), tick, true, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, { eyes: 'x', down: true, potions })
     const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
     const colors = new Set<number>()
+    const spray = (c: Set<number>) => UNLOAD_COLORS.pixels.some(p => c.has(p))
     for (let i = 0; i < words.length; i += 3) colors.add(words[i + 1]!).add(words[i + 2]!)
     return colors
   }
@@ -76,27 +77,28 @@ test('a potion ring flashes at the main slime\'s upper left', async () => {
   expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
 })
 
-test('unloading wakes a sleeping slime, which spits crates and flashes green under falling arrows', async () => {
+test('unloading wakes a sleeping slime, which flashes green, spits colored pixels under falling arrows', async () => {
   const look = (tick: number, face: { unloading?: boolean }) => {
     const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, face)
     const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
     const colors = new Set<number>()
+    const spray = (c: Set<number>) => UNLOAD_COLORS.pixels.some(p => c.has(p))
     const chars = new Set<number>()
     for (let i = 0; i < words.length; i += 3) {
       chars.add(words[i]!)
       colors.add(words[i + 1]!).add(words[i + 2]!)
     }
-    return { colors, asleep: chars.has('z'.codePointAt(0)!), arrows: chars.has('↓'.codePointAt(0)!) }
+    return { colors, pixels: spray(colors), asleep: chars.has('z'.codePointAt(0)!), arrows: chars.has('↓'.codePointAt(0)!) }
   }
   expect(look(0, {}).asleep).toBe(true)
-  expect(look(0, {}).colors.has(UNLOAD_COLORS.crate.C)).toBe(false)
+  expect(look(0, {}).pixels).toBe(false)
   expect(look(0, {}).arrows).toBe(false)
   expect(look(2, { unloading: true }).asleep).toBe(false)
-  expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.crate.C)).toBe(true)
+  expect(look(2, { unloading: true }).pixels).toBe(true)
   expect(look(2, { unloading: true }).arrows).toBe(true)
-  // Green on every other three ticks.
+  // Green as each spray leaves, every four ticks.
   expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(false)
-  expect(look(3, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(true)
+  expect(look(4, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(true)
 })
 
 test('slime colors: each family wears the palette picked for it, shared or not', async () => {
