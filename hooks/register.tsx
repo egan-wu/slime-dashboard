@@ -567,26 +567,48 @@ async function setWaiting($: EngineInterface, value: boolean) {
   await logEvent($, value ? '? Waiting for your answer' : 'Answered: the troop moves on')
 }
 
+// The Skill Box's skills, their order and the Party Combos are one store
+// for every window open at once: each change is made to what the store holds
+// now, not to this window's copy, so one window never writes another's
+// changes away; and the copy is read afresh as the Skill Box or Skill Tree
+// opens.
+async function readShared($: EngineInterface) {
+  const skills = skillsFrom(await $.store.get(SKILLS_KEY))
+  const skillOrder = orderMapFrom(await $.store.get(SKILL_ORDER_KEY))
+  const catOrder = namesFrom(await $.store.get(CAT_ORDER_KEY))
+  const combos = combosFrom(await $.store.get(COMBOS_KEY))
+  await update($, skillsAtom, () => skills)
+  await update($, skillOrderAtom, () => skillOrder)
+  await update($, catOrderAtom, () => catOrder)
+  await update($, combosAtom, () => combos)
+}
+
 async function setSkills($: EngineInterface, fn: (list: Skill[]) => Skill[]) {
-  const list = fn(await read($, skillsAtom))
-  await update($, skillsAtom, () => list)
+  const list = fn(skillsFrom(await $.store.get(SKILLS_KEY)))
   await $.store.set(SKILLS_KEY, list)
+  await update($, skillsAtom, () => list)
   return list
 }
 
 // A skill's [▼]: it trades places with the one under it, in its category's
-// order as shown; the arrangement is kept.
+// order as the store now holds it; the arrangement is kept.
 async function skillDown($: EngineInterface, category: string, names: string[], at: number) {
-  const next = { ...(await read($, skillOrderAtom)), [category]: swapNames(names, at) }
-  await update($, skillOrderAtom, () => next)
+  const name = names[at]
+  const kept = orderMapFrom(await $.store.get(SKILL_ORDER_KEY))
+  const now = inOrder(names, kept[category], n => n)
+  const next = { ...kept, [category]: name === undefined ? now : swapNames(now, now.indexOf(name)) }
   await $.store.set(SKILL_ORDER_KEY, next)
+  await update($, skillOrderAtom, () => next)
 }
 
-// A category's [▼] or [▲]: it trades places with the next or the one before.
+// A category's [▼] or [▲]: it trades places with the next or the one before,
+// in the order the store now holds.
 async function moveCategory($: EngineInterface, categories: string[], at: number, by: -1 | 1) {
-  const next = swapNames(categories, at, by)
-  await update($, catOrderAtom, () => next)
+  const name = categories[at]
+  const now = inOrder(categories, namesFrom(await $.store.get(CAT_ORDER_KEY)), n => n)
+  const next = name === undefined ? now : swapNames(now, now.indexOf(name), by)
   await $.store.set(CAT_ORDER_KEY, next)
+  await update($, catOrderAtom, () => next)
 }
 
 // A skill's button: run it as the person would type it, with the Skill Box's
@@ -612,9 +634,9 @@ async function runSkill($: EngineInterface, skill: Skill) {
 }
 
 async function setCombos($: EngineInterface, fn: (list: Combo[]) => Combo[]) {
-  const list = fn(await read($, combosAtom))
-  await update($, combosAtom, () => list)
+  const list = fn(combosFrom(await $.store.get(COMBOS_KEY)))
   await $.store.set(COMBOS_KEY, list)
+  await update($, combosAtom, () => list)
   return list
 }
 
@@ -838,7 +860,6 @@ export const register: Register = on => {
       description: 'Open the slime dashboard pane, or manage its Skill Box',
       argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]',
     })
-    const kept = await $.store.get(SKILLS_KEY)
     const colors = colorsFrom(await $.store.get(COLORS_KEY))
     setColors(colors)
     await update($, colorsAtom, () => colors)
@@ -851,14 +872,8 @@ export const register: Register = on => {
     await update($, orderAtom, () => orderKept)
     const hiddenKept = await $.store.get(HIDDEN_KEY)
     if (Array.isArray(hiddenKept)) await update($, hiddenAtom, () => hiddenKept.filter((h): h is string => typeof h === 'string'))
-    const skillOrderKept = orderMapFrom(await $.store.get(SKILL_ORDER_KEY))
-    await update($, skillOrderAtom, () => skillOrderKept)
-    const catOrderKept = namesFrom(await $.store.get(CAT_ORDER_KEY))
-    await update($, catOrderAtom, () => catOrderKept)
-    const combosKept = combosFrom(await $.store.get(COMBOS_KEY))
-    await update($, combosAtom, () => combosKept)
     // Names kept before categories come back filed under General.
-    await update($, skillsAtom, () => skillsFrom(kept))
+    await readShared($)
     waiting = await read($, waitingAtom)
     busy = await read($, busyAtom)
     // Slimes that were dropping out when the module reloaded are simply gone.
@@ -1559,7 +1574,10 @@ export const register: Register = on => {
     const skillBox = (
       <Box flexDirection="column">
         {rule}
-        {header('Skill Box', 'skills-toggle', skillsOpen, () => update($, skillsOpenAtom, o => !o))}
+        {header('Skill Box', 'skills-toggle', skillsOpen, async () => {
+          if (!skillsOpen) await readShared($)
+          await update($, skillsOpenAtom, o => !o)
+        })}
         {skillsOpen && (
           <Box flexDirection="column">
             {Input && (
@@ -1779,7 +1797,10 @@ export const register: Register = on => {
     const tree = (
       <Box flexDirection="column">
         {rule}
-        {header(treeOpen ? 'Skill Tree' : `Skill Tree (${combos.length})`, 'tree-toggle', treeOpen, () => update($, treeOpenAtom, o => !o))}
+        {header(treeOpen ? 'Skill Tree' : `Skill Tree (${combos.length})`, 'tree-toggle', treeOpen, async () => {
+          if (!treeOpen) await readShared($)
+          await update($, treeOpenAtom, o => !o)
+        })}
         {treeOpen && (
           <Box flexDirection="column">
             <Box flexDirection="row" flexWrap="wrap" marginLeft={1}>

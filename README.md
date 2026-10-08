@@ -20,7 +20,7 @@ To update later, press `[Update]` under [Setting](#setting).
 
 ## Session
 
-<img src="docs/session.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners, [≡] at its left, and under it three recent sessions with how long ago each was used">
+<img src="docs/session-sign.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners, [≡] at its left, and under it three recent sessions with how long ago each was used">
 
 At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename typed at the prompt shows after the next one.
 
@@ -140,7 +140,7 @@ Skills go in the Skill Box with `add`. Without `--category` a skill goes under *
 /slime-dashboard add run-unit-test --category Test --desc run the unit tests
 ```
 
-The skills you add, their order and your Party Combos are kept on this computer, shared by every project and session (each reads them as it starts); another computer starts with General's `[Unload]` alone.
+The skills you add, their order and your Party Combos are kept on this computer, shared by every project and session; windows open at once each see the others' changes when the Skill Box or Skill Tree opens, and never write them away; another computer starts with General's `[Unload]` alone.
 
 ## Development
 

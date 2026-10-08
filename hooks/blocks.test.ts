@@ -130,12 +130,44 @@ test('skills file under a category with a dim description; old plain names read 
   mock.clock(on)
   const manage = (args: string) =>
     $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
-  expect((await manage('add lint --category Code --desc run the linter')).text).toBe('Skill Box: added /lint under Code (1 registered).')
-  expect((await manage('list')).text).toBe('General: /compact (Unload) /clear (Respawn)\nCode: /lint')
+  expect((await manage('add lint --category Code --desc run the linter')).text).toBe('Skill Box: added /lint under Code (2 registered).')
+  // The store's old plain name, read afresh for the change, files under General.
+  expect((await manage('list')).text).toBe('General: /compact (Unload) /clear (Respawn) /timer\nCode: /lint')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'skills-toggle' })
   expect((await ui.find({ key: 'skillcat-Code' }))?.text).toBe('▼ Code')
   expect(await ui.find({ type: 'Text', text: ': run the linter' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('two windows at once: each change builds on what the store holds now, and opening reads it afresh', async ($, on) => {
+  // The store as both windows share it; `other` writes as the other window would.
+  const kept = new Map<string, unknown>()
+  on('store.get', async (_$, e) => ({ value: kept.get(e.key) }))
+  on('store.set', async (_$, e) => (kept.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }))
+  mock.clock(on)
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const names = () => (kept.get('skills') as { name: string }[]).map(s => s.name)
+  await manage('add lint --category Code')
+  // The other window adds fmt and saves a combo; this one then adds test.
+  kept.set('skills', [...(kept.get('skills') as unknown[]), { name: 'fmt', category: 'Code' }])
+  kept.set('combos', [{ name: 'Other', layers: [{ steps: [{ skill: 'fmt', model: 'haiku', agent: 'general-purpose' }] }] }])
+  await manage('add test --category Code')
+  expect(names()).toEqual(expect.arrayContaining(['lint', 'fmt', 'test']))
+  // Opened, the Skill Box shows the other window's skill and combo.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  expect(await ui.find({ key: 'skill-fmt' })).toBeDefined()
+  expect(await ui.find({ key: 'combo-Other' })).toBeDefined()
+  // A combo saved here keeps the other window's.
+  kept.set('combos', [...(kept.get('combos') as unknown[]), { name: 'Later', layers: [] }])
+  await ui.press({ key: 'tree-toggle' })
+  await ui.press({ key: 'combo-new' })
+  await ui.press({ key: 'wave-add-0' })
+  await ui.press({ key: 'pick-0-lint' })
+  await ui.press({ key: 'combo-save' })
+  expect((kept.get('combos') as { name: string }[]).map(c => c.name)).toEqual(['Other', 'Later', 'Combo 1'])
   await ui.unmount()
 })
 

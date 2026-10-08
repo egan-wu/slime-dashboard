@@ -400,7 +400,10 @@ render('top', top_rows(), cells['walkingFrames'][0])
 render_gif('top', top_rows(), cells['walkingFrames'])
 render('asleep', waiting_rows(), cells['asleep'])
 render('waiting', waiting_rows(), cells['waiting'], ask=True)
-render('session', session_rows(), None)
+render('session-sign', session_rows(), None)
+for old in ('session',):
+    if os.path.exists(os.path.join(DOCS, f'{old}.png')):
+        os.remove(os.path.join(DOCS, f'{old}.png'))
 render('property', property_rows(), None)
 render('skills', skills_rows(), None)
 render('tree', tree_rows(), None)
