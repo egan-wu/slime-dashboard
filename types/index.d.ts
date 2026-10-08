@@ -39,6 +39,8 @@ declare module 'claude-code' {
       colorOpen: boolean
       colors: Record<'Fable' | 'Opus' | 'Sonnet' | 'Haiku', 'purple' | 'red' | 'blue' | 'yellow' | 'green' | 'pink'>
       unloading: boolean
+      orderOpen: boolean
+      order: Array<'stats' | 'scene' | 'models' | 'property' | 'skills' | 'monitor' | 'events'>
       behind: boolean
     }
   }

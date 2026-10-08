@@ -4,6 +4,7 @@ import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } f
 import { addEvent, offsetOf, stamp } from './events'
 import { ASK, frame, ROWS } from './scene'
 import { grouped, parseAdd, skillsFrom } from './skills'
+import { DEFAULT_ORDER, moveSection, orderFrom } from './layout'
 import { VERSION } from './version'
 
 const PLUGIN = 'slime-dashboard'
@@ -439,5 +440,41 @@ test('Setting: Color cycles a family through six colors; Default puts them back'
   expect((await ui.find({ key: 'color-Opus' }))?.text).toBe('[Red]')
   await ui.press({ key: 'color' })
   expect(await ui.find({ key: 'color-Opus' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('Order: a kept order is cleaned up, and a move swaps neighbors', () => {
+  expect(orderFrom(undefined)).toEqual(DEFAULT_ORDER)
+  // Unknown and repeated ids dropped; the missing ones back at the end.
+  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['events', 'stats', 'scene', 'models', 'property', 'skills', 'monitor'])
+  expect(moveSection(DEFAULT_ORDER, 'scene', -1).slice(0, 2)).toEqual(['scene', 'stats'])
+  expect(moveSection(DEFAULT_ORDER, 'stats', -1)).toEqual(DEFAULT_ORDER)
+  expect(moveSection(DEFAULT_ORDER, 'events', 1)).toEqual(DEFAULT_ORDER)
+})
+
+test('Setting: Order moves sections up and down; Default puts them back', async ($, on) => {
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const titles = async () =>
+    (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').filter(t => ['Property ', 'Skill Box ', 'Sub-agent Monitor ', 'Event Message '].includes(t))
+  await ui.press({ key: 'settings-toggle' })
+  expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
+  await ui.press({ key: 'order' })
+  expect(await titles()).toEqual(['Property ', 'Skill Box ', 'Sub-agent Monitor ', 'Event Message '])
+  await ui.press({ key: 'order-up-events' })
+  await ui.press({ key: 'order-up-events' })
+  expect(await titles()).toEqual(['Property ', 'Event Message ', 'Skill Box ', 'Sub-agent Monitor '])
+  await ui.press({ key: 'order-down-property' })
+  expect(await titles()).toEqual(['Event Message ', 'Property ', 'Skill Box ', 'Sub-agent Monitor '])
+  // A hidden section keeps its place, so it comes back where it was.
+  await ui.press({ key: 'display' })
+  await ui.press({ key: 'display-property' })
+  expect(await titles()).toEqual(['Event Message ', 'Skill Box ', 'Sub-agent Monitor '])
+  await ui.press({ key: 'display-property' })
+  expect(await titles()).toEqual(['Event Message ', 'Property ', 'Skill Box ', 'Sub-agent Monitor '])
+  await ui.press({ key: 'order-default' })
+  expect(await titles()).toEqual(['Property ', 'Skill Box ', 'Sub-agent Monitor ', 'Event Message '])
+  await ui.press({ key: 'order' })
+  expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
   await ui.unmount()
 })

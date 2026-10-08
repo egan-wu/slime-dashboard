@@ -14,6 +14,8 @@ import { cleanSummary, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
+import { DEFAULT_ORDER, moveSection, orderFrom, SECTIONS } from './layout'
+import type { SectionId } from './layout'
 import { VERSION } from './version'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL } from './weather'
 import type { SlimeMinion, SlimeWeather } from '../types'
@@ -71,6 +73,10 @@ const hiddenAtom = atom({ plugin: 'slime-dashboard', key: 'hidden' } as const, [
 const colorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'colorOpen' } as const, false)
 const colorsAtom = atom({ plugin: 'slime-dashboard', key: 'colors' } as const, DEFAULT_COLORS as SlimeColors)
 // True while the main conversation's context compacts (Unload, /compact, auto).
+// Setting's Order: whether its box is open, and the sections' order from the
+// top (kept in the store across sessions).
+const orderOpenAtom = atom({ plugin: 'slime-dashboard', key: 'orderOpen' } as const, false)
+const orderAtom = atom({ plugin: 'slime-dashboard', key: 'order' } as const, DEFAULT_ORDER as SectionId[])
 const unloadingAtom = atom({ plugin: 'slime-dashboard', key: 'unloading' } as const, false)
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
@@ -95,17 +101,7 @@ const SKILL_ROWS = 5
 const SKILLS_KEY = 'skills'
 const HIDDEN_KEY = 'hidden'
 const COLORS_KEY = 'colors'
-// The sections Display can hide, top to bottom; Setting itself always shows,
-// so a hidden section can always be brought back.
-const SECTIONS = [
-  { id: 'stats', label: 'HP / MP / CP' },
-  { id: 'scene', label: 'Slime' },
-  { id: 'models', label: 'Model buttons' },
-  { id: 'property', label: 'Property' },
-  { id: 'skills', label: 'Skill Box' },
-  { id: 'monitor', label: 'Sub-agent Monitor' },
-  { id: 'events', label: 'Event Message' },
-] as const
+const ORDER_KEY = 'order'
 // Tools whose call itself waits on the person.
 const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // Notifications that mean the person is asked: a permission dialog, an MCP elicitation.
@@ -198,6 +194,17 @@ async function toggleSection($: EngineInterface, id: string) {
   const next = hidden.includes(id) ? hidden.filter(h => h !== id) : [...hidden, id]
   await update($, hiddenAtom, () => next)
   await $.store.set(HIDDEN_KEY, next)
+}
+
+// Setting's Order: the section a place up or down (from the order as it is
+// when pressed), or the default order.
+async function moveOrder($: EngineInterface, id: SectionId, by: -1 | 1) {
+  await setOrder($, moveSection(await read($, orderAtom), id, by))
+}
+
+async function setOrder($: EngineInterface, order: SectionId[]) {
+  await update($, orderAtom, () => order)
+  await $.store.set(ORDER_KEY, order)
 }
 
 // Setting's Color: the family's next color, round the palettes.
@@ -512,6 +519,8 @@ export const register: Register = on => {
     await update($, colorsAtom, () => colors)
     // A compaction cut short by a reload is not still running.
     await update($, unloadingAtom, () => false)
+    const orderKept = orderFrom(await $.store.get(ORDER_KEY))
+    await update($, orderAtom, () => orderKept)
     const hiddenKept = await $.store.get(HIDDEN_KEY)
     if (Array.isArray(hiddenKept)) await update($, hiddenAtom, () => hiddenKept.filter((h): h is string => typeof h === 'string'))
     // Names kept before categories come back filed under General.
@@ -772,6 +781,8 @@ export const register: Register = on => {
     const displayOpen = await read($, displayOpenAtom)
     const hidden = await read($, hiddenAtom)
     const shown = (id: string) => !hidden.includes(id)
+    const orderOpen = await read($, orderOpenAtom)
+    const order = await read($, orderAtom)
     const setting = (
       <Box flexDirection="column">
         {rule}
@@ -825,6 +836,29 @@ export const register: Register = on => {
               <Box flexDirection="row" marginLeft={2}>
                 <Button key="color" label="[Color]" plain onPress={() => update($, colorOpenAtom, o => !o)} />
                 <Text dimColor>: slime colors</Text>
+              </Box>
+            )}
+            {orderOpen ? (
+              // Open, Order is a rounded box like Display's: each section, top
+              // to bottom, with buttons that move it a place up or down.
+              <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginLeft={1} width={Math.max(8, (columns || OPEN.columns) - 2)}>
+                <Button key="order" label="[Order]" plain onPress={() => update($, orderOpenAtom, o => !o)} />
+                {order.map((id, i) => (
+                  <Box key={`order-row-${id}`} flexDirection="row">
+                    <Button key={`order-up-${id}`} label="[▲]" plain dimColor={i === 0} onPress={() => moveOrder($, id, -1)} />
+                    <Button key={`order-down-${id}`} label="[▼]" plain dimColor={i === order.length - 1} onPress={() => moveOrder($, id, 1)} />
+                    <Text dimColor={!shown(id)}>{` ${SECTIONS.find(s => s.id === id)!.label}`}</Text>
+                  </Box>
+                ))}
+                {/* Under the section names, past the two buttons. */}
+                <Box flexDirection="row" marginLeft={7}>
+                  <Button key="order-default" label="[Default]" plain onPress={() => setOrder($, DEFAULT_ORDER)} />
+                </Box>
+              </Box>
+            ) : (
+              <Box flexDirection="row" marginLeft={2}>
+                <Button key="order" label="[Order]" plain onPress={() => update($, orderOpenAtom, o => !o)} />
+                <Text dimColor>: arrange sections</Text>
               </Box>
             )}
             <Box flexDirection="row" marginLeft={2}>
@@ -1078,45 +1112,40 @@ export const register: Register = on => {
       </Text>
     )
 
-    if (e.surface === 'terminal') {
-      const { Raster } = $.ui.resolve(e)
-      columns = Math.max(1, Math.min(512, e.props.bodyColumns))
-
-      return (
-        <Box flexDirection="column">
-          {shown('stats') && stats}
-          {shown('scene') && <Box flexDirection="column">
-            <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading })} />
-            {isWaiting && (
-              // The bubble's question mark, bold, laid over its middle cell.
-              <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>
-                <Text bold color={hex(ASK.mark)} backgroundColor={hex(bubbleFill(tick))}>
-                  ?
-                </Text>
-              </Box>
-            )}
-          </Box>}
-          {shown('models') && picker}
-          {shown('property') && property}
-          {shown('skills') && skillBox}
-          {shown('monitor') && monitor}
-          {shown('events') && eventMessage}
-          {setting}
-        </Box>
-      )
-    }
-
-    return (
+    // The sections in Order's order, each left out while Display hides it;
+    // Setting always last.
+    const arranged = (blocks: Record<SectionId, typeof stats>) => (
       <Box flexDirection="column">
-        {shown('stats') && stats}
-        {shown('scene') && line}
-        {shown('models') && picker}
-        {shown('property') && property}
-        {shown('skills') && skillBox}
-        {shown('monitor') && monitor}
-        {shown('events') && eventMessage}
+        {order.filter(shown).map(id => (
+          <Box key={`section-${id}`} flexDirection="column">
+            {blocks[id]}
+          </Box>
+        ))}
         {setting}
       </Box>
     )
+    const rest = { stats, models: picker, property, skills: skillBox, monitor, events: eventMessage }
+
+    if (e.surface === 'terminal') {
+      const { Raster } = $.ui.resolve(e)
+      columns = Math.max(1, Math.min(512, e.props.bodyColumns))
+      const scene = (
+        <Box flexDirection="column">
+          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading })} />
+          {isWaiting && (
+            // The bubble's question mark, bold, laid over its middle cell.
+            <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>
+              <Text bold color={hex(ASK.mark)} backgroundColor={hex(bubbleFill(tick))}>
+                ?
+              </Text>
+            </Box>
+          )}
+        </Box>
+      )
+
+      return arranged({ ...rest, scene })
+    }
+
+    return arranged({ ...rest, scene: line })
   })
 }
