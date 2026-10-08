@@ -36,7 +36,6 @@ declare module 'claude-code' {
       settingsOpen: boolean
       displayOpen: boolean
       hidden: string[]
-      updateStatus: string
       behind: boolean
     }
   }

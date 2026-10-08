@@ -59,13 +59,12 @@ const skillTopsAtom = atom({ plugin: 'slime-dashboard', key: 'skillTops' } as co
 const skillCatsClosedAtom = atom({ plugin: 'slime-dashboard', key: 'skillCatsClosed' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
 const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as const, false)
-// The Setting block: open or not, and what the last Update said ('' before one).
+// The Setting block: open or not.
 const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' } as const, false)
 // Setting's Display: whether its box is open, and the sections hidden from the
 // pane (kept in the store across sessions).
 const displayOpenAtom = atom({ plugin: 'slime-dashboard', key: 'displayOpen' } as const, false)
 const hiddenAtom = atom({ plugin: 'slime-dashboard', key: 'hidden' } as const, [] as string[])
-const updateStatusAtom = atom({ plugin: 'slime-dashboard', key: 'updateStatus' } as const, '')
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
 const tallyAtom = atom({ plugin: 'slime-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
@@ -385,9 +384,14 @@ async function checkFreshness($: EngineInterface) {
   }
 }
 
+// Update tells how it went in a toast and in Event Message, never in a line
+// under the button.
 async function updatePlugin($: EngineInterface) {
-  const say = (text: string) => update($, updateStatusAtom, () => text)
-  await say('Updating: fetching the latest from GitHub…')
+  const tell = async (text: string) => {
+    $.ui.toast(text)
+    await logEvent($, text)
+  }
+  $.ui.toast('Updating: fetching the latest from GitHub…')
   try {
     const steps: [string, string[]][] = [
       ['refresh the marketplace', ['claude', 'plugin', 'marketplace', 'update', MARKETPLACE]],
@@ -397,19 +401,16 @@ async function updatePlugin($: EngineInterface) {
       const run = await $.process.run(argv, { timeoutMs: 120_000 })
       if (run.exitCode !== 0) {
         const why = lastLine(run.stderr) || lastLine(run.stdout) || `exit ${run.exitCode}`
-        await say(`Update failed to ${what}: ${why}`)
-        await logEvent($, `Update failed: ${why}`)
+        await tell(`Update failed to ${what}: ${why}`)
         return
       }
     }
     await update($, behindAtom, () => false)
-    await say('Updated: reloading plugins…')
-    await logEvent($, 'Updated from GitHub: reloading plugins')
+    await tell('Updated from GitHub: reloading plugins')
     await $.command.run({ command: 'reload-plugins' })
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
-    await say(`Update failed: ${why}`)
-    await logEvent($, `Update failed: ${why}`)
+    await tell(`Update failed: ${why}`)
   }
 }
 
@@ -717,7 +718,6 @@ export const register: Register = on => {
     // stamp (YYYYMMDD-hhmm) on the first row and its summary from the second.
     // Setting, at the very bottom: Update fetches the latest from GitHub.
     const settingsOpen = await read($, settingsOpenAtom)
-    const updateStatus = await read($, updateStatusAtom)
     const behind = await read($, behindAtom)
     const displayOpen = await read($, displayOpenAtom)
     const hidden = await read($, hiddenAtom)
@@ -734,9 +734,6 @@ export const register: Register = on => {
               <Button key="update" label="[Update]" plain onPress={() => updatePlugin($)} />
               <Text dimColor>: update dashboard</Text>
             </Box>
-            {updateStatus !== '' && (
-              <Text dimColor wrap="wrap">{`  ${updateStatus}`}</Text>
-            )}
             {displayOpen ? (
               // Open, Display is a rounded box with its button at the top left
               // (pressed again, it closes) over a checkbox for each section.

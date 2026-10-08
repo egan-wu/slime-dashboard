@@ -334,6 +334,11 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
       ? { value: { exitCode: 1, stdout: '', stderr: 'Plugin "slime-dashboard" is not installed', isStdoutTruncated: false, isStderrTruncated: false } }
       : { value: { exitCode: 0, stdout: 'ok', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  const toasts: string[] = []
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   let reloads = 0
   on('command.run', { command: 'reload-plugins' }, async () => {
     reloads++
@@ -353,12 +358,15 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
     'claude plugin update slime-dashboard@slime-dashboard',
   ])
   expect(reloads).toBe(1)
-  expect(await ui.find({ type: 'Text', text: /Updated: reloading plugins/ })).toBeDefined()
+  // Told in a toast and in Event Message; nothing shows under the button.
+  expect(toasts).toEqual(['Updating: fetching the latest from GitHub…', 'Updated from GitHub: reloading plugins'])
+  expect(await ui.find({ type: 'Text', text: /^Updated from GitHub/ })).toBeDefined()
 
   failOn = 'plugin update'
   await ui.press({ key: 'update' })
   expect(reloads).toBe(1)
-  expect(await ui.find({ type: 'Text', text: /Update failed to update the plugin: Plugin "slime-dashboard" is not installed/ })).toBeDefined()
+  expect(toasts.at(-1)).toBe('Update failed to update the plugin: Plugin "slime-dashboard" is not installed')
+  expect(await ui.find({ type: 'Text', text: /^Update failed to update/ })).toBeDefined()
   await ui.unmount()
 })
 
