@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Draws the README's pictures of the pane: docs/idle.png, docs/busy.png, docs/waiting.png.
+"""Draws the README's pictures of the pane, one per section: docs/*.png.
 
 The scene comes from the mod's own hooks/scene.ts (run with Node's type
 stripping); the rows of text around it are laid out as hooks/register.tsx
-lays them out, by hand, so change them here when the pane changes. Each
-button carries a numbered badge in the right margin; the README's table
-says what each number does.
+lays them out, by hand, so change them here when the pane changes.
 
 Needs Node 22+ and Pillow:  python3 tools/pictures.py
 """
@@ -55,10 +53,10 @@ import { frame, ROWS } from './scene.ts'
 const W = %d
 const decode = (b64: string) => { const b = Buffer.from(b64, 'base64'); const u = new Uint32Array(b.buffer, b.byteOffset, b.length / 4); return Array.from({ length: ROWS }, (_, r) => Array.from(u.slice(r * W * 3, (r + 1) * W * 3))) }
 const off = (n: number) => ({ cloud: 23 + n, bird: 40, tree: 52 + n, rock: 31 + n, ground: 9 })
-const troop = [{ model: 'claude-haiku-4-5', pos: 0 }, { model: 'claude-sonnet-5-5', pos: 1 }]
+const troop = [{ model: 'claude-haiku-5-5', pos: 0 }, { model: 'claude-sonnet-5-5', pos: 1 }]
 console.log(JSON.stringify({
-  idle: decode(frame(W, off(0), 7, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' })),
-  busy: decode(frame(W, off(0), 12, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }, undefined, { eyes: '><' })),
+  walking: decode(frame(W, off(28), 12, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' })),
+  asleep: decode(frame(W, off(0), 7, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' })),
   waiting: decode(frame(W, off(5), 0, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }, undefined, { ask: true })),
 }))
 """ % W)
@@ -110,61 +108,73 @@ def version():
     return [run(' ' * (W - 1 - len(v))), run(v, SLATE)]
 
 
-def idle_rows():
-    return [
-        (bar('HP', 100, 10, HP), None),
-        (cp_bar(18, 10), None),
-        (('scene',), None),
-        (picker(), 1),
-        (RULE, None), (header('Property', False), 2),
-        (RULE, None), (header('Skill Box', False), 3),
-        (RULE, None), (header('Party', True), 4),
-        ([run(' - none', DIM)], None),
-        (RULE, None), (header('Event Message', True), 5),
-        (event('20261008-0109', 'Effort: High'), None),
-        (RULE, None), (header('Setting', False), 6),
-        (version(), None),
-    ]
+def section(title, *rows):
+    """A section as the pane draws it open: its title, then its rows."""
+    return [(header(title, True), None)] + [(r, None) for r in rows]
 
 
-def busy_rows():
+def top_rows():
     hp_mp = bar('HP', 23, 5, HP) + [run(' ')] + bar('MP', 70, 5, MP)
-    return [
-        (hp_mp, None),
-        (cp_bar(62, 21), None),
-        (('scene',), None),
-        (picker(), 1),
-        (RULE, None), (header('Property', True), 2),
-        ([run(' Model: '), run('[Opus 5.5]')], 7),
-        ([run(' Effort: '), run('[High]')], 8),
-        ([run(' '), run('[Low]', DIM), run('[Mid]', DIM), run('[High]'), run('[xHigh]', DIM), run('[Max]', DIM)], 9),
-        ([run(' Cache Hit Rate: 91.4%')], None),
-        ([run(' Token Usage: 1.84M')], None),
-        ([run(' Iteration Rate: 7/∞')], None),
-        ([run(' Latest Command: 48.2s')], None),
-        (RULE, None), (header('Skill Box', True), 3),
-        (('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP), 10),
-        ([run('▼ General')], 11),
-        (('frame', [[run('[Unload]'), run(': compact context window', DIM)],
-                    [run('[timer]'), run(': background timer, prompt = seconds', DIM)]]), 12),
-        ([run('▲ Code (1)')], 11),
-        (RULE, None), (header('Party', True), 4),
-        ([run(' - '), run('Haiku 5.5', rgb(MODEL['Haiku'])), run(' '), run('[', STOP), run('x'), run(']', STOP)], 4),
-        ([run('    - Timer: 30 s', DIM)], None),
-        ([run(' - '), run('Sonnet 5.5', rgb(MODEL['Sonnet'])), run(' '), run('[', STOP), run('x'), run(']', STOP)], 4),
-        ([run('    - Review the hooks module', DIM)], None),
-        (RULE, None), (header('Event Message', True), 5),
-        (event('20261008-0112', '▶ Started Sonnet 5.5: Review', 'the hooks module'), None),
-        (event('20261008-0112', '▶ Started Haiku 5.5: Timer:', '30 s'), None),
-        (RULE, None), (header('Setting', True), 6),
-        ([run('  [Update]'), run(': update dashboard', DIM)], 13),
-        ([run('  [Display]'), run(': choose sections', DIM)], 14),
-        ([run('  [Color]'), run(': slime colors', DIM)], 15),
-        ([run('  [Order]'), run(': arrange sections', DIM)], 16),
-        ([run('  [Width] [-] 33 [+]'), run(': panel width', DIM)], 17),
-        ([run('  [Reload]'), run(': reload dashboard', DIM)], 18),
-        (version(), None),
-    ]
+    return [(hp_mp, None), (cp_bar(62, 21), None), (('scene',), None), (picker(), None)]
+
+
+def property_rows():
+    return section(
+        'Property',
+        [run(' Model: '), run('[Opus 5.5]')],
+        [run(' Effort: '), run('[High]')],
+        [run(' '), run('[Low]', DIM), run('[Mid]', DIM), run('[High]'), run('[xHigh]', DIM), run('[Max]', DIM)],
+        [run(' Cache Hit Rate: 91.4%')],
+        [run(' Token Usage: 1.84M')],
+        [run(' Iteration Rate: 7/∞')],
+        [run(' Latest Command: 48.2s')],
+    )
+
+
+def skills_rows():
+    return section(
+        'Skill Box',
+        ('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP),
+        [run('▼ General')],
+        ('frame', [[run('[Unload]'), run(': compact context window', DIM)],
+                   [run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
+        [run('▲ Code (1)')],
+    )
+
+
+def stop_mark():
+    return [run(' '), run('[', STOP), run('x'), run(']', STOP)]
+
+
+def party_rows():
+    return section(
+        'Party',
+        [run(' - '), run('Haiku 5.5', rgb(MODEL['Haiku']))] + stop_mark(),
+        [run('    - Timer: 30 s', DIM)],
+        [run(' - '), run('Sonnet 5.5', rgb(MODEL['Sonnet']))] + stop_mark(),
+        [run('    - Review the hooks module', DIM)],
+    )
+
+
+def events_rows():
+    return section(
+        'Event Message',
+        event('20261008-0114', '✔ Finished Haiku 5.5: Timer:', '30 s'),
+        event('20261008-0113', '✖ Stopped Fable 5.1: Review', 'layout'),
+        event('20261008-0112', '▶ Started Sonnet 5.5: Review', 'the hooks module'),
+    )
+
+
+def setting_rows():
+    return section(
+        'Setting',
+        [run('  [Update]'), run(': update dashboard', DIM)],
+        [run('  [Display]'), run(': choose sections', DIM)],
+        [run('  [Color]'), run(': slime colors', DIM)],
+        [run('  [Order]'), run(': arrange sections', DIM)],
+        [run('  [Width] [-] 33 [+]'), run(': panel width', DIM)],
+        [run('  [Reload]'), run(': reload dashboard', DIM)],
+    ) + [(version(), None)]
 
 
 def waiting_rows():
@@ -230,7 +240,8 @@ def draw_scene(d, cells, y, ask=False):
 
 
 def render(name, rows, cells, ask=False):
-    img = Image.new('RGB', ((W + MARGIN) * CW + 2 * PAD, height(rows) * CH + 2 * PAD), BG)
+    margin = MARGIN if any(badge is not None for _, badge in rows) else 0
+    img = Image.new('RGB', ((W + margin) * CW + 2 * PAD, height(rows) * CH + 2 * PAD), BG)
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([4, 4, PAD + W * CW + PAD // 2, img.height - 5], radius=14, outline=BORDER, width=3)
     y = PAD
@@ -264,6 +275,14 @@ with open(os.path.join(HOOKS, 'version.ts')) as f:
 if not shutil.which('node'):
     sys.exit('needs node 22+ on PATH')
 cells = scenes()
-render('idle', idle_rows(), cells['idle'])
-render('busy', busy_rows(), cells['busy'])
+for old in ('idle', 'busy'):
+    if os.path.exists(os.path.join(DOCS, f'{old}.png')):
+        os.remove(os.path.join(DOCS, f'{old}.png'))
+render('top', top_rows(), cells['walking'])
+render('asleep', waiting_rows(), cells['asleep'])
 render('waiting', waiting_rows(), cells['waiting'], ask=True)
+render('property', property_rows(), None)
+render('skills', skills_rows(), None)
+render('party', party_rows(), None)
+render('events', events_rows(), None)
+render('setting', setting_rows(), None)
