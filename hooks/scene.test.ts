@@ -160,9 +160,16 @@ test('trees come in three kinds, picked at random but steady per spot', async ()
 
 test('goo: blobs lie on the road clear of rocks, and the slime gapes at and eats each one', async () => {
   const blobs = goos(0, 2000)
-  expect(blobs.length).toBeGreaterThan(50)
+  expect(blobs.length).toBeGreaterThan(30)
   expect(goos(100, 400)).toEqual(goos(100, 400))
-  for (const x of blobs) expect(scattered('rock', x - 5, x + 3)).toEqual([])
+  for (const x of blobs) {
+    expect(scattered('rock', x - 5, x + 3)).toEqual([])
+    // Within reach of every blob the slime is on the ground, free to gape.
+    for (let d = 1; d <= 3; d++) {
+      const left = x - d - 5
+      expect(rockLift(left, 6, scattered('rock', left - 20, left + 30))).toBe(0)
+    }
+  }
   const W = 40
   const off = fresh()
   let gaped = false

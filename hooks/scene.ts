@@ -97,8 +97,8 @@ const SLIME = {
   // settle again on landing.
   air: ['..BB..', '.BHMB.', 'DEMMED', 'DBBBBD', '.DDDD.'],
   sleep: ['.BHMB.', 'DBMMBD', 'DBBBBD'],
-  // Jaw dropped wide over a blob of goo just ahead, stretching it two rows
-  // taller: K the open mouth, R the tongue.
+  // Jaw dropped wide over a blob of goo just ahead, stretching it taller:
+  // K the open mouth, R the tongue.
   gape: ['.BHMB.', 'DEMMED', 'DKKKKD', 'DKKKKD', 'DKRRKD', 'DBBBBD'],
 }
 const MOUTH = { K: 0xffffff, R: 0xff7a9c }
@@ -154,8 +154,8 @@ type Band = { layer: Layer; span: number; items: Item[]; sprite: Sprite }
 // stretch always comes out the same, so a scene scrolls back and forth stably.
 type Scatter = { layer: 'tree' | 'rock'; sprite: Sprite; span: number; jitter: number; skip: number; seed: number }
 const SCATTER: Scatter[] = [
-  { layer: 'tree', sprite: TREE, span: 40, jitter: 30, skip: 4, seed: 0x7ee },
-  { layer: 'rock', sprite: ROCK, span: 48, jitter: 34, skip: 3, seed: 0x60c },
+  { layer: 'tree', sprite: TREE, span: 50, jitter: 38, skip: 4, seed: 0x7ee },
+  { layer: 'rock', sprite: ROCK, span: 60, jitter: 43, skip: 3, seed: 0x60c },
 ]
 const unit = (n: number, seed: number) => (Math.imul((n ^ seed) | 0, 2654435761) >>> 0) / 2 ** 32
 
@@ -180,7 +180,7 @@ export function scattered(layer: 'tree' | 'rock', from: number, to: number): num
 // context filling up), so none is ever drawn behind it; unloading, it spits
 // them back out (UNLOAD_COLORS.pixels).
 export const GOO_COLORS = [0xff595e, 0xff924c, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93, 0xff70a6] as const
-const GOO_SCATTER = { span: 18, jitter: 12, skip: 3, seed: 0x900 }
+const GOO_SCATTER = { span: 20, jitter: 13, skip: 3, seed: 0x900 }
 // A blob is a plain 2x2 block, spat out or lying on the road.
 const GOO = ['GG', 'GG']
 const GOO_W = 2
@@ -195,7 +195,10 @@ export function goos(from: number, to: number): number[] {
     if (Math.floor(unit(k, sc.seed) * sc.skip) === 0) continue
     const x = k * sc.span + Math.floor(unit(k, sc.seed * 3 + 1) * sc.jitter)
     if (x < from || x >= to) continue
-    if (scattered('rock', x - ROCK_W - 1, x + GOO_W + 1).length > 0) continue
+    // Clear of rocks ahead, and far enough past one behind that the slime has
+    // landed by the time it comes within reach to gape.
+    const reachLeft = x - GAPE_REACH - SLIME.awake[0]!.length + 1
+    if (scattered('rock', reachLeft - ROCK_CLEAR - ROCK_W + 1, x + GOO_W + 1).length > 0) continue
     found.push(x)
   }
   return found
@@ -204,8 +207,8 @@ export const gooColor = (worldX: number) => GOO_COLORS[Math.floor(unit(worldX, 0
 
 // Each band repeats every `span` pixels so scrolling wraps seamlessly.
 const BANDS: Band[] = [
-  { layer: 'cloud', span: 40, sprite: CLOUD, items: [{ x: 3, y: 0 }, { x: 22, y: 2, sparse: true }, { x: 13, y: 1, overcast: true }] },
-  { layer: 'bird', span: 60, sprite: BIRDS[0]!, items: [{ x: 14, y: 5 }, { x: 44, y: 6 }] },
+  { layer: 'cloud', span: 50, sprite: CLOUD, items: [{ x: 4, y: 0 }, { x: 28, y: 2, sparse: true }, { x: 16, y: 1, overcast: true }] },
+  { layer: 'bird', span: 75, sprite: BIRDS[0]!, items: [{ x: 18, y: 5 }, { x: 55, y: 6 }] },
 ]
 
 // Rocks are obstacles: a slime whose columns a rock is passing under clears
