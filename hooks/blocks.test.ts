@@ -110,14 +110,14 @@ test('General holds Unload, which runs /compact; the CP bar is no button', async
     expect(await ui.find({ key: 'unload' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /UNLOAD/ })).toBeUndefined()
     await ui.press({ key: 'skills-toggle' })
-    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▲ General')
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▼ General')
     expect((await ui.find({ key: 'skill-Unload' }))?.text).toBe('[Unload]')
     expect(await ui.find({ type: 'Text', text: ': compact context window' })).toBeDefined()
     await ui.press({ key: 'skill-Unload' })
     // A category closes to its title and count, and opens again.
     await ui.press({ key: 'skillcat-General' })
     expect(await ui.find({ key: 'skill-Unload' })).toBeUndefined()
-    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▼ General (1)')
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▲ General (1)')
     await ui.press({ key: 'skillcat-General' })
     await ui.press({ key: 'skills-toggle' })
     await ui.unmount()
@@ -134,7 +134,7 @@ test('skills file under a category with a dim description; old plain names read 
   expect((await manage('list')).text).toBe('General: /compact (Unload)\nCode: /lint')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'skills-toggle' })
-  expect((await ui.find({ key: 'skillcat-Code' }))?.text).toBe('▲ Code')
+  expect((await ui.find({ key: 'skillcat-Code' }))?.text).toBe('▼ Code')
   expect(await ui.find({ type: 'Text', text: ': run the linter' })).toBeDefined()
   await ui.unmount()
 })
@@ -374,14 +374,14 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
   await ui.unmount()
 })
 
-test('every block shows ▼ while closed and ▲ while open', async ($, on) => {
+test('every block shows ▲ while closed and ▼ while open', async ($, on) => {
   mock.store(on)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     for (const key of ['props-toggle', 'skills-toggle', 'settings-toggle']) {
-      expect((await ui.find({ key }))?.text).toBe('▼')
-      await ui.press({ key })
       expect((await ui.find({ key }))?.text).toBe('▲')
+      await ui.press({ key })
+      expect((await ui.find({ key }))?.text).toBe('▼')
       await ui.press({ key })
     }
     await ui.unmount()

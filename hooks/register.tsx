@@ -737,7 +737,7 @@ export const register: Register = on => {
     const header = (title: string, key: string, isOpen: boolean, toggle: () => unknown) => (
       <Box flexDirection="row">
         <Text dimColor>{`${title} `}</Text>
-        <Button key={key} label={isOpen ? '▲' : '▼'} onPress={toggle} />
+        <Button key={key} label={isOpen ? '▼' : '▲'} onPress={toggle} />
       </Box>
     )
 
@@ -1052,7 +1052,7 @@ export const register: Register = on => {
           <Box flexDirection="row">
             <Button
               key={`skillcat-${g.category}`}
-              label={`${isOpen ? '▲' : '▼'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
+              label={`${isOpen ? '▼' : '▲'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
               plain
               onPress={() => toggleCategory(g.category)}
             />
