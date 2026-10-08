@@ -33,6 +33,7 @@ BG, FG, DIM = (24, 24, 27), (220, 220, 220), (128, 128, 136)
 BORDER, BADGE = (70, 70, 80), (255, 210, 63)
 DEFAULT = 0x01000000
 HP, MP, SLATE = (255, 92, 92), (77, 184, 255), (95, 113, 134)
+STOP = (230, 57, 70)  # Party's red [x]
 MODEL = {'Haiku': 0xffc300, 'Sonnet': 0x3a86ff, 'Opus': 0xe5383b, 'Fable': 0x9b5de5}
 
 
@@ -90,7 +91,7 @@ RULE = [run('─' * (W - 1), DIM)]
 
 
 def header(title, open_):
-    return [run(f'{title} ', DIM), run(f'[ {"▲" if open_ else "▼"} ]')]
+    return [run(f'{title} ', DIM), run(f'[ {"▼" if open_ else "▲"} ]')]
 
 
 def picker():
@@ -117,7 +118,7 @@ def idle_rows():
         (picker(), 1),
         (RULE, None), (header('Property', False), 2),
         (RULE, None), (header('Skill Box', False), 3),
-        (RULE, None), (header('Sub-agent Monitor', True), 4),
+        (RULE, None), (header('Party', True), 4),
         ([run(' - none', DIM)], None),
         (RULE, None), (header('Event Message', True), 5),
         (event('20261008-0109', 'Effort: High'), None),
@@ -143,20 +144,25 @@ def busy_rows():
         ([run(' Latest Command: 48.2s')], None),
         (RULE, None), (header('Skill Box', True), 3),
         (('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP), 10),
-        ([run('▾ General')], 11),
-        ([run('  [Unload]'), run(': compact context window', DIM)], 12),
-        ([run('  [timer]'), run(': background timer, prompt = seconds', DIM)], 12),
-        ([run('▸ Code (1)')], 11),
-        (RULE, None), (header('Sub-agent Monitor', True), 4),
-        ([run(' - '), run('Haiku 4.5', rgb(MODEL['Haiku']))], None),
+        ([run('▼ General')], 11),
+        (('frame', [[run('[Unload]'), run(': compact context window', DIM)],
+                    [run('[timer]'), run(': background timer, prompt = seconds', DIM)]]), 12),
+        ([run('▲ Code (1)')], 11),
+        (RULE, None), (header('Party', True), 4),
+        ([run(' - '), run('Haiku 5.5', rgb(MODEL['Haiku'])), run(' '), run('[', STOP), run('x'), run(']', STOP)], 4),
         ([run('    - Timer: 30 s', DIM)], None),
-        ([run(' - '), run('Sonnet 5.5', rgb(MODEL['Sonnet']))], None),
+        ([run(' - '), run('Sonnet 5.5', rgb(MODEL['Sonnet'])), run(' '), run('[', STOP), run('x'), run(']', STOP)], 4),
         ([run('    - Review the hooks module', DIM)], None),
         (RULE, None), (header('Event Message', True), 5),
         (event('20261008-0112', '▶ Started Sonnet 5.5: Review', 'the hooks module'), None),
-        (event('20261008-0112', '▶ Started Haiku 4.5: Timer:', '30 s'), None),
+        (event('20261008-0112', '▶ Started Haiku 5.5: Timer:', '30 s'), None),
         (RULE, None), (header('Setting', True), 6),
         ([run('  [Update]'), run(': update dashboard', DIM)], 13),
+        ([run('  [Display]'), run(': choose sections', DIM)], 14),
+        ([run('  [Color]'), run(': slime colors', DIM)], 15),
+        ([run('  [Order]'), run(': arrange sections', DIM)], 16),
+        ([run('  [Width] [-] 33 [+]'), run(': panel width', DIM)], 17),
+        ([run('  [Reload]'), run(': reload dashboard', DIM)], 18),
         (version(), None),
     ]
 

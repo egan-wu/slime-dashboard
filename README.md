@@ -4,7 +4,7 @@ A Claude Code side pane in the spirit of the offline dino game, starring a slime
 
 | Idle, blocks closed | Busy, blocks open |
 | --- | --- |
-| <img src="docs/idle.png" width="340" alt="Idle on an API key: full HP, CP 18%, the slime asleep at night; Property, Skill Box and Setting closed, buttons numbered 1 to 6"> | <img src="docs/busy.png" width="340" alt="Busy on a subscription: HP 23%, MP 70%, CP 62% so the slime squints, two subagent slimes behind it; every block open, buttons numbered 1 to 13"> |
+| <img src="docs/idle.png" width="340" alt="Idle on an API key: full HP, CP 18%, the slime asleep at night; Property, Skill Box and Setting closed, buttons numbered 1 to 6"> | <img src="docs/busy.png" width="340" alt="Busy on a subscription: HP 23%, MP 70%, CP 62% so the slime squints, two subagent slimes behind it, each with a red [x] in Party; every block open, buttons numbered 1 to 18"> |
 
 <img src="docs/waiting.png" width="340" alt="Waiting on you: the troop stops and a speech bubble with a bold question mark flashes over the main slime">
 
@@ -42,7 +42,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 - **Its face**: out of HP or MP it stops with `x` eyes until a limit resets, and a flashing ring at its upper left holds the potion it needs: blue mana for MP, red health for HP. While the context compacts (`[Unload]`, `/compact`, or automatically) it wakes up if asleep and sets its load down until the compaction ends: every few beats its body flashes white and it spits the goo it ate back out of its back in a spray of colored blocks, and green `↓` arrows fall beside it. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
 - **Subagents**: each one buds off a little slime in its model's color. When the work is done the troop finds a treasure chest.
 - **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) every 15 minutes (wttr.in places you by your IP address). Moon, stars and birds hide under an overcast sky.
-- **Event Message**: the newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started or finished, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, an update.
+- **Event Message**: the newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started, finished or stopped, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, an update.
 - **Version**: the plugin's version, at the pane's foot.
 
 ## Install
