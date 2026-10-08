@@ -21,7 +21,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 3 | Skill Box `[ ▲ ]` | Opens or closes the skill box (10–12). |
 | 4 | Sub-agent Monitor `[ ▼ ]` | Opens or closes the running subagents; closed, the title counts them. |
 | 5 | Event Message `[ ▼ ]` | Opens or closes the newest three events; closed, the title counts them. |
-| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–15). |
+| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–16). |
 | 7 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
 | 8 | Effort `[High]` | Opens the row of levels (9). |
 | 9 | `[Low][Mid][High][xHigh][Max]` | Picking a level runs `/effort` with it and closes the row. |
@@ -30,13 +30,14 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 12 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | 13 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked at start and every 30 minutes). |
 | 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Sub-agent Monitor, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
-| 15 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
+| 15 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and the monitor, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
+| 16 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
 
 ## What it shows
 
 - **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, shading from light to dark grey.
-- **The slime**: it travels while Claude works, past clouds, birds, trees and rocks at their own speeds; once the turn ends it falls asleep while the clouds and birds drift on. Its color follows the model: Fable purple, Opus red, Sonnet blue, Haiku yellow.
-- **Its face**: out of HP or MP it stops with `x` eyes until a limit resets, and a flashing ring at its upper left holds the potion it needs: blue mana for MP, red health for HP. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
+- **The slime**: it travels while Claude works, past clouds, birds, trees and rocks at their own speeds; once the turn ends it falls asleep while the clouds and birds drift on. Its color follows the model: Fable purple, Opus red, Sonnet blue, Haiku yellow, unless Setting's `[Color]` picked others.
+- **Its face**: out of HP or MP it stops with `x` eyes until a limit resets, and a flashing ring at its upper left holds the potion it needs: blue mana for MP, red health for HP. While the context compacts (`[Unload]`, `/compact`, or automatically) it wakes up if asleep, and a flashing ring at the same place shows a sack with a green arrow pointing down until the compaction ends. Walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`).
 - **Subagents**: each one buds off a little slime in its model's color. When the work is done the troop finds a treasure chest.
 - **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) every 15 minutes (wttr.in places you by your IP address). Moon, stars and birds hide under an overcast sky.
 - **Event Message**: the newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started or finished, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, an update.

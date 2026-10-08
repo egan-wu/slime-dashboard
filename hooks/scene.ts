@@ -29,20 +29,53 @@ export function step(off: Offsets, busy: boolean): void {
 
 export type ModelInfo = { name: string; body: number; light: number; dark: number }
 
-const MODELS: Array<[RegExp, Omit<ModelInfo, 'name'>, string]> = [
-  [/fable/i, { body: 0x9b5de5, light: 0xe0cdfb, dark: 0x6a3fb0 }, 'Fable'],
-  [/opus/i, { body: 0xe5383b, light: 0xffc2c3, dark: 0xa4161a }, 'Opus'],
-  [/sonnet/i, { body: 0x3a86ff, light: 0xc6ddff, dark: 0x1f4fb3 }, 'Sonnet'],
-  [/haiku/i, { body: 0xffc300, light: 0xfff3c2, dark: 0xb38600 }, 'Haiku'],
-]
+// The slime colors Setting's Color can give each model family; any two
+// families may share one.
+export const PALETTES = {
+  purple: { name: 'Purple', body: 0x9b5de5, light: 0xe0cdfb, dark: 0x6a3fb0 },
+  red: { name: 'Red', body: 0xe5383b, light: 0xffc2c3, dark: 0xa4161a },
+  blue: { name: 'Blue', body: 0x3a86ff, light: 0xc6ddff, dark: 0x1f4fb3 },
+  yellow: { name: 'Yellow', body: 0xffc300, light: 0xfff3c2, dark: 0xb38600 },
+  green: { name: 'Green', body: 0x2dc653, light: 0xc3f5cf, dark: 0x1a7f35 },
+  pink: { name: 'Pink', body: 0xf15bb5, light: 0xffd0ec, dark: 0xb0307f },
+} as const
+export type PaletteId = keyof typeof PALETTES
+export const PALETTE_IDS = Object.keys(PALETTES) as PaletteId[]
+
+export const FAMILIES = ['Fable', 'Opus', 'Sonnet', 'Haiku'] as const
+export type Family = (typeof FAMILIES)[number]
+export type SlimeColors = Record<Family, PaletteId>
+export const DEFAULT_COLORS: SlimeColors = { Fable: 'purple', Opus: 'red', Sonnet: 'blue', Haiku: 'yellow' }
+
+const PATTERNS: Record<Family, RegExp> = { Fable: /fable/i, Opus: /opus/i, Sonnet: /sonnet/i, Haiku: /haiku/i }
 const UNKNOWN = { body: 0x52b788, light: 0xc7ebd6, dark: 0x2d6a4f }
 
+// The colors in use: the defaults, with whatever the person picked over them.
+let chosen: SlimeColors = { ...DEFAULT_COLORS }
+
+// Keeps the families and palettes it knows and drops anything else, so a
+// stored pick from another version cannot break the scene.
+export function colorsFrom(value: unknown): SlimeColors {
+  const picked = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+  const colors = { ...DEFAULT_COLORS }
+  for (const family of FAMILIES) {
+    const id = picked[family]
+    if (typeof id === 'string' && id in PALETTES) colors[family] = id as PaletteId
+  }
+  return colors
+}
+
+export function setColors(colors: SlimeColors): void {
+  chosen = { ...colors }
+}
+
 export function modelInfo(model: string): ModelInfo {
-  for (const [pattern, colors, family] of MODELS) {
-    if (!pattern.test(model)) continue
+  for (const family of FAMILIES) {
+    if (!PATTERNS[family].test(model)) continue
     const version = model.match(new RegExp(`${family}[-\\s]?(\\d+)(?:[-.](\\d{1,2})(?!\\d))?`, 'i'))
     const name = version ? `${family} ${version[1]}${version[2] ? `.${version[2]}` : ''}` : family
-    return { name, ...colors }
+    const { body, light, dark } = PALETTES[chosen[family]]
+    return { name, body, light, dark }
   }
   return { name: model || '…', ...UNKNOWN }
 }
@@ -319,6 +352,19 @@ export const POTION_COLORS = {
   mp: { O: 0xe8e8f0, k: 0x9c6644, p: 0x3a86ff, P: 0x8fbcff },
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
+// Unloading (the context compacting): a ring at the same place holding a
+// sack with a green arrow pointing down, a load being set down. It flashes
+// as the potions do, until the compaction ends.
+const UNLOAD = [
+  '..OOO..',
+  '.O.k.O.',
+  'O.bgb.O',
+  'O.bgb.O',
+  'O.ggg.O',
+  '.O.g.O.',
+  '..OOO..',
+]
+export const UNLOAD_COLORS = { O: 0xe8e8f0, k: 0x9c6644, b: 0xc89f6a, g: 0x38b000 } as const
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -381,7 +427,8 @@ export function frame(
   // Down, or waiting on the person, it stands still and wide awake: nothing
   // passes until a limit resets or they answer. The little slimes keep hopping.
   const halted = face.down === true || face.ask === true
-  const awake = busy || fete !== undefined || halted
+  // Unloading wakes it too, though it only travels if the session is busy.
+  const awake = busy || fete !== undefined || halted || face.unloading === true
   const travelling = fete ? fete.scrolling : busy && !halted
   const px = new Uint32Array(w * PX_H).fill(SKY)
   const put = (x: number, y: number, color: number) => {
@@ -541,9 +588,9 @@ export function frame(
     // The main slime crawls along the ground and only leaves it to clear a rock.
     const width = SLIME.awake[0]!.length
     const left = cx - (width >> 1)
-    // Halted, nothing passes beneath it: it stays on the ground.
-    const lift = halted ? 0 : rockLift(left, width, rocks)
-    const rows = halted
+    // Standing still, nothing passes beneath it: it stays on the ground.
+    const lift = travelling ? rockLift(left, width, rocks) : 0
+    const rows = !travelling
       ? SLIME.awake
       : lift > 0
         ? SLIME.air
@@ -566,11 +613,13 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
-    if (face.potions && Math.floor(tick / 4) % 3 !== 2) {
+    if (Math.floor(tick / 4) % 3 !== 2) {
       const width = POTION[0]!.length
-      face.potions.forEach((kind, i) =>
-        draw({ rows: POTION, colors: POTION_COLORS[kind] }, left - (width + 1) * (i + 1), top - 2),
-      )
+      const rings = [
+        ...(face.potions ?? []).map(kind => ({ rows: POTION, colors: POTION_COLORS[kind] })),
+        ...(face.unloading ? [{ rows: UNLOAD, colors: UNLOAD_COLORS }] : []),
+      ]
+      rings.forEach((ring, i) => draw(ring, left - (width + 1) * (i + 1), top - 2))
     }
     // The bubble's tail rests on the head.
     if (face.ask) draw({ rows: BUBBLE, colors: { B: bubbleFill(tick) } }, cx - (BUBBLE[0]!.length >> 1), top - 1)

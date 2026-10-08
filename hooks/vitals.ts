@@ -42,7 +42,9 @@ export type Eyes = 'x' | '><' | 'TT'
 // `potions`: the pools that ran dry, each shown as a flashing potion in a
 // ring at the main slime's upper left: blue for MP, red for HP.
 export type Potion = 'hp' | 'mp'
-export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[] }
+// `unloading`: the context is compacting; the slime wakes and a flashing
+// ring with a sack and a green down arrow stands where the potions do.
+export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[]; unloading?: boolean }
 
 // Down: it stops with crossed-out eyes. Walking with a full head: squinting
 // from 50%, a vein beside its head from 70%, in tears from 90%.

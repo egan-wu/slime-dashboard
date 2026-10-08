@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
-import { ASK, bubbleCell, bubbleFill, EMERGE_TICKS, frame, hex, homeCx, modelInfo, partyLength, partyScrolling, ROWS, slotOf, step } from './scene'
+import { ASK, bubbleCell, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, ROWS, setColors, slotOf, step } from './scene'
+import type { Family, SlimeColors } from './scene'
 import type { Offsets } from './scene'
 import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
 import type { SlimeEvent } from './events'
@@ -65,6 +66,12 @@ const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' }
 // pane (kept in the store across sessions).
 const displayOpenAtom = atom({ plugin: 'slime-dashboard', key: 'displayOpen' } as const, false)
 const hiddenAtom = atom({ plugin: 'slime-dashboard', key: 'hidden' } as const, [] as string[])
+// Setting's Color: whether its box is open, and the slime color each model
+// family wears (kept in the store across sessions).
+const colorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'colorOpen' } as const, false)
+const colorsAtom = atom({ plugin: 'slime-dashboard', key: 'colors' } as const, DEFAULT_COLORS as SlimeColors)
+// True while the main conversation's context compacts (Unload, /compact, auto).
+const unloadingAtom = atom({ plugin: 'slime-dashboard', key: 'unloading' } as const, false)
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
 const tallyAtom = atom({ plugin: 'slime-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
@@ -87,6 +94,7 @@ const turnStartedAtAtom = atom({ plugin: 'slime-dashboard', key: 'turnStartedAt'
 const SKILL_ROWS = 5
 const SKILLS_KEY = 'skills'
 const HIDDEN_KEY = 'hidden'
+const COLORS_KEY = 'colors'
 // The sections Display can hide, top to bottom; Setting itself always shows,
 // so a hidden section can always be brought back.
 const SECTIONS = [
@@ -112,6 +120,7 @@ let minions: SlimeMinion[] = []
 let weather: SlimeWeather = DEFAULT_WEATHER
 let vitals: Vitals = FULL
 let waiting = false
+let unloading = false
 // This computer's UTC offset in minutes, read from `date +%z` when the
 // session starts; until then (or where it cannot run) event stamps use the
 // plugin environment's own zone.
@@ -189,6 +198,25 @@ async function toggleSection($: EngineInterface, id: string) {
   const next = hidden.includes(id) ? hidden.filter(h => h !== id) : [...hidden, id]
   await update($, hiddenAtom, () => next)
   await $.store.set(HIDDEN_KEY, next)
+}
+
+// Setting's Color: the family's next color, round the palettes.
+async function cycleColor($: EngineInterface, family: Family) {
+  const colors = await read($, colorsAtom)
+  const at = PALETTE_IDS.indexOf(colors[family])
+  await setSlimeColors($, { ...colors, [family]: PALETTE_IDS[(at + 1) % PALETTE_IDS.length]! })
+}
+
+async function setSlimeColors($: EngineInterface, colors: SlimeColors) {
+  setColors(colors)
+  await update($, colorsAtom, () => colors)
+  await $.store.set(COLORS_KEY, colors)
+}
+
+async function setUnloading($: EngineInterface, value: boolean) {
+  unloading = value
+  await update($, unloadingAtom, () => value)
+  $.ui.invalidate('ui.render')
 }
 
 // Setting's Reload: load the dashboard afresh, as a save to its files would.
@@ -479,6 +507,11 @@ export const register: Register = on => {
       argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]',
     })
     const kept = await $.store.get(SKILLS_KEY)
+    const colors = colorsFrom(await $.store.get(COLORS_KEY))
+    setColors(colors)
+    await update($, colorsAtom, () => colors)
+    // A compaction cut short by a reload is not still running.
+    await update($, unloadingAtom, () => false)
     const hiddenKept = await $.store.get(HIDDEN_KEY)
     if (Array.isArray(hiddenKept)) await update($, hiddenAtom, () => hiddenKept.filter((h): h is string => typeof h === 'string'))
     // Names kept before categories come back filed under General.
@@ -517,7 +550,7 @@ export const register: Register = on => {
       if (tick % 10 === 5) await checkMinions($)
       if (columns > 0) {
         const walking = moving(busy, minions)
-        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting }
+        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting, unloading }
         const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, face)
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
@@ -556,6 +589,19 @@ export const register: Register = on => {
     await logEvent($, 'Unloaded: the context was compacted')
 
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // A compaction of the main conversation, however it was asked for: the
+  // slime wakes and shows the unload ring until it ends. One computed ahead
+  // of time in the background is not the person's and shows nothing.
+  on('session.compact', async ($, e, next) => {
+    if (e.agentId !== undefined || e.trigger === 'precompute') return next(e)
+    await setUnloading($, true)
+    try {
+      return await next(e)
+    } finally {
+      await setUnloading($, false)
+    }
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
@@ -641,6 +687,10 @@ export const register: Register = on => {
     const isBusy = moving(await read($, busyAtom), followers)
     const v = await read($, vitalsAtom)
     const isWaiting = await read($, waitingAtom)
+    const isUnloading = await read($, unloadingAtom)
+    const colors = await read($, colorsAtom)
+    setColors(colors)
+    const colorOpen = await read($, colorOpenAtom)
     const info = modelInfo(current)
     const status = isBusy ? '▸' : 'z'
 
@@ -752,6 +802,26 @@ export const register: Register = on => {
               <Box flexDirection="row" marginLeft={2}>
                 <Button key="display" label="[Display]" plain onPress={() => update($, displayOpenAtom, o => !o)} />
                 <Text dimColor>: choose sections</Text>
+              </Box>
+            )}
+            {colorOpen ? (
+              // Open, Color is a rounded box like Display's: each family's
+              // swatch and name, and its color's button, pressed for the next.
+              <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginLeft={1} width={Math.max(8, (columns || OPEN.columns) - 2)}>
+                <Button key="color" label="[Color]" plain onPress={() => update($, colorOpenAtom, o => !o)} />
+                {FAMILIES.map(family => (
+                  <Box key={`color-row-${family}`} flexDirection="row">
+                    <Text color={hex(PALETTES[colors[family]].body)}>■ </Text>
+                    <Text>{family.padEnd(7)}</Text>
+                    <Button key={`color-${family}`} label={`[${PALETTES[colors[family]].name}]`} plain onPress={() => cycleColor($, family)} />
+                  </Box>
+                ))}
+                <Button key="color-default" label="[Default]" plain onPress={() => setSlimeColors($, DEFAULT_COLORS)} />
+              </Box>
+            ) : (
+              <Box flexDirection="row" marginLeft={2}>
+                <Button key="color" label="[Color]" plain onPress={() => update($, colorOpenAtom, o => !o)} />
+                <Text dimColor>: slime colors</Text>
               </Box>
             )}
             <Box flexDirection="row" marginLeft={2}>
@@ -1013,7 +1083,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {shown('stats') && stats}
           {shown('scene') && <Box flexDirection="column">
-            <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting })} />
+            <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading })} />
             {isWaiting && (
               // The bubble's question mark, bold, laid over its middle cell.
               <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>

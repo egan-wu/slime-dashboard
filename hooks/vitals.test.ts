@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { frame, POTION_COLORS, ROWS } from './scene'
+import { colorsFrom, DEFAULT_COLORS, frame, modelInfo, PALETTES, POTION_COLORS, ROWS, setColors, UNLOAD_COLORS } from './scene'
 import { faceOf, filledOf, isDown, vitalsOf } from './vitals'
 
 test('a subscription: HP is the seven-day limit left, MP the five-hour one', async () => {
@@ -74,4 +74,34 @@ test('a potion ring flashes at the main slime\'s upper left', async () => {
   expect(pixels(0, ['mp']).has(POTION_COLORS.hp.p)).toBe(false)
   expect(pixels(0, ['mp', 'hp']).has(POTION_COLORS.hp.p)).toBe(true)
   expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
+})
+
+test('unloading wakes a sleeping slime under a flashing ring with a sack', async () => {
+  const look = (tick: number, face: { unloading?: boolean }) => {
+    const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, face)
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    const colors = new Set<number>()
+    const chars = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) {
+      chars.add(words[i]!)
+      colors.add(words[i + 1]!).add(words[i + 2]!)
+    }
+    return { colors, asleep: chars.has('z'.codePointAt(0)!) }
+  }
+  expect(look(0, {}).asleep).toBe(true)
+  expect(look(0, {}).colors.has(UNLOAD_COLORS.g)).toBe(false)
+  expect(look(0, { unloading: true }).asleep).toBe(false)
+  expect(look(0, { unloading: true }).colors.has(UNLOAD_COLORS.g)).toBe(true)
+  expect(look(8, { unloading: true }).colors.has(UNLOAD_COLORS.g)).toBe(false)
+})
+
+test('slime colors: each family wears the palette picked for it, shared or not', async () => {
+  expect(modelInfo('claude-opus-5-5').body).toBe(PALETTES.red.body)
+  setColors({ ...DEFAULT_COLORS, Opus: 'pink', Haiku: 'pink' })
+  expect(modelInfo('claude-opus-5-5')).toEqual({ name: 'Opus 5.5', ...(({ name: _, ...c }) => c)(PALETTES.pink) })
+  expect(modelInfo('claude-haiku-4-5').body).toBe(PALETTES.pink.body)
+  expect(modelInfo('claude-sonnet-5-5').body).toBe(PALETTES.blue.body)
+  setColors(DEFAULT_COLORS)
+  expect(colorsFrom({ Opus: 'green', Fable: 'plaid', Other: 'red' })).toEqual({ ...DEFAULT_COLORS, Opus: 'green' })
+  expect(colorsFrom(undefined)).toEqual(DEFAULT_COLORS)
 })

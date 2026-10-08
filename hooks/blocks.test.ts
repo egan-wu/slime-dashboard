@@ -417,3 +417,27 @@ test('Setting: Display hides and shows sections, Reload reloads the dashboard', 
   expect(reloads).toEqual(['reload'])
   await ui.unmount()
 })
+
+test('Setting: Color cycles a family through six colors; Default puts them back', async ($, on) => {
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'settings-toggle' })
+  expect(await ui.find({ key: 'color-Opus' })).toBeUndefined()
+  await ui.press({ key: 'color' })
+  expect((await ui.find({ key: 'color-Opus' }))?.text).toBe('[Red]')
+  const seen: string[] = []
+  for (let i = 0; i < 6; i++) {
+    await ui.press({ key: 'color-Opus' })
+    seen.push((await ui.find({ key: 'color-Opus' }))!.text!)
+  }
+  expect(seen).toEqual(['[Blue]', '[Yellow]', '[Green]', '[Pink]', '[Purple]', '[Red]'])
+  // Opus wearing Haiku's yellow: colors may repeat.
+  await ui.press({ key: 'color-Opus' })
+  await ui.press({ key: 'color-Opus' })
+  expect((await ui.find({ key: 'color-Opus' }))?.text).toBe('[Yellow]')
+  await ui.press({ key: 'color-default' })
+  expect((await ui.find({ key: 'color-Opus' }))?.text).toBe('[Red]')
+  await ui.press({ key: 'color' })
+  expect(await ui.find({ key: 'color-Opus' })).toBeUndefined()
+  await ui.unmount()
+})
