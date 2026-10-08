@@ -31,6 +31,9 @@ const FRESHNESS_MS = 30 * 60 * 1000
 const WEATHER_RETRY_MS = 2 * 60 * 1000
 // Docked beside the fullscreen transcript, the sidebar asks for this width.
 const OPEN = { id: PANE, title: 'Slime', columns: 33 }
+// Setting's Width moves the docked pane's width a column at a time, between these.
+const MIN_COLUMNS = 24
+const MAX_COLUMNS = 80
 // The model buttons under the scene: each switches the session with /model
 // and the family's alias, which always resolves to that family's newest model.
 // A Button's label takes no color of its own, so a square in the model's
@@ -77,6 +80,8 @@ const colorsAtom = atom({ plugin: 'slime-dashboard', key: 'colors' } as const, D
 // top (kept in the store across sessions).
 const orderOpenAtom = atom({ plugin: 'slime-dashboard', key: 'orderOpen' } as const, false)
 const orderAtom = atom({ plugin: 'slime-dashboard', key: 'order' } as const, DEFAULT_ORDER as SectionId[])
+// Setting's Width: the columns the docked pane asks for (kept in the store).
+const widthAtom = atom({ plugin: 'slime-dashboard', key: 'width' } as const, OPEN.columns)
 const unloadingAtom = atom({ plugin: 'slime-dashboard', key: 'unloading' } as const, false)
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
@@ -102,6 +107,7 @@ const SKILLS_KEY = 'skills'
 const HIDDEN_KEY = 'hidden'
 const COLORS_KEY = 'colors'
 const ORDER_KEY = 'order'
+const WIDTH_KEY = 'width'
 // Tools whose call itself waits on the person.
 const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // Notifications that mean the person is asked: a permission dialog, an MCP elicitation.
@@ -194,6 +200,19 @@ async function toggleSection($: EngineInterface, id: string) {
   const next = hidden.includes(id) ? hidden.filter(h => h !== id) : [...hidden, id]
   await update($, hiddenAtom, () => next)
   await $.store.set(HIDDEN_KEY, next)
+}
+
+// Open the pane, asking for the width Setting's Width chose.
+async function openPane($: EngineInterface) {
+  return $.ui.open({ ...OPEN, columns: await read($, widthAtom) })
+}
+
+// Setting's Width: a column narrower or wider, kept, and the pane reopened at it.
+async function nudgeWidth($: EngineInterface, by: -1 | 1) {
+  const next = Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, (await read($, widthAtom)) + by))
+  await update($, widthAtom, () => next)
+  await $.store.set(WIDTH_KEY, next)
+  await openPane($)
 }
 
 // Setting's Order: the section a place up or down (from the order as it is
@@ -534,7 +553,11 @@ export const register: Register = on => {
     vitals = await read($, vitalsAtom)
     await refreshModel($)
     await refreshVitals($)
-    void $.ui.open(OPEN)
+    const widthKept = await $.store.get(WIDTH_KEY)
+    if (typeof widthKept === 'number' && Number.isInteger(widthKept)) {
+      await update($, widthAtom, () => Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, widthKept)))
+    }
+    void openPane($)
     void readLocalZone($)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
@@ -574,7 +597,7 @@ export const register: Register = on => {
   on('command.run', { command: 'slime-dashboard' }, async ($, e) => {
     const said = await manageSkills($, e.args)
     if (said !== undefined) return { text: said }
-    await $.ui.open(OPEN)
+    await openPane($)
 
     return { text: 'Slime dashboard opened.' }
   })
@@ -782,6 +805,7 @@ export const register: Register = on => {
     const hidden = await read($, hiddenAtom)
     const shown = (id: string) => !hidden.includes(id)
     const orderOpen = await read($, orderOpenAtom)
+    const paneColumns = await read($, widthAtom)
     const order = await read($, orderAtom)
     const setting = (
       <Box flexDirection="column">
@@ -861,6 +885,13 @@ export const register: Register = on => {
                 <Text dimColor>: arrange sections</Text>
               </Box>
             )}
+            <Box flexDirection="row" marginLeft={2}>
+              <Text>{'[Width] '}</Text>
+              <Button key="width-down" label="[-]" plain dimColor={paneColumns <= MIN_COLUMNS} onPress={() => nudgeWidth($, -1)} />
+              <Text>{` ${paneColumns} `}</Text>
+              <Button key="width-up" label="[+]" plain dimColor={paneColumns >= MAX_COLUMNS} onPress={() => nudgeWidth($, 1)} />
+              <Text dimColor>: panel width</Text>
+            </Box>
             <Box flexDirection="row" marginLeft={2}>
               <Button key="reload" label="[Reload]" plain onPress={() => reloadDashboard($)} />
               <Text dimColor>: reload dashboard</Text>

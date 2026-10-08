@@ -481,3 +481,21 @@ test('Setting: Order moves sections up and down; Default puts them back', async 
   expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
   await ui.unmount()
 })
+
+test('Setting: Width asks for the pane a column narrower or wider', async ($, on) => {
+  mock.store(on)
+  const asked: (number | undefined)[] = []
+  on('ui.open', async (_$, e) => {
+    asked.push(e.columns)
+    return { value: { isPlaced: true as const } }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'settings-toggle' })
+  expect(await ui.find({ type: 'Text', text: ' 33 ' })).toBeDefined()
+  await ui.press({ key: 'width-up' })
+  await ui.press({ key: 'width-up' })
+  await ui.press({ key: 'width-down' })
+  expect(await ui.find({ type: 'Text', text: ' 34 ' })).toBeDefined()
+  expect(asked.slice(-3)).toEqual([34, 35, 34])
+  await ui.unmount()
+})

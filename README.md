@@ -21,7 +21,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 3 | Skill Box `[ ▲ ]` | Opens or closes the skill box (10–12). |
 | 4 | Sub-agent Monitor `[ ▲ ]` | Opens or closes the running subagents; closed, the title counts them. |
 | 5 | Event Message `[ ▲ ]` | Opens or closes the newest three events; closed, the title counts them. |
-| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–17). |
+| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–18). |
 | 7 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
 | 8 | Effort `[High]` | Opens the row of levels (9). |
 | 9 | `[Low][Mid][High][xHigh][Max]` | Picking a level runs `/effort` with it and closes the row. |
@@ -32,7 +32,8 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Sub-agent Monitor, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
 | 15 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and the monitor, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | 16 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
-| 17 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
+| 17 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
+| 18 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
 
 ## What it shows
 
