@@ -176,7 +176,7 @@ test('goo: blobs lie on the road clear of rocks, and the slime gapes at and eats
       // Nothing it has passed is left lying behind it.
       if (goo) expect(col).toBeGreaterThan(W - 8 + 2)
       seen ||= goo
-      gaped ||= words[i + 1] === 0x2b0f1e || words[i + 2] === 0x2b0f1e
+      gaped ||= words[i + 1] === 0xff7a9c || words[i + 2] === 0xff7a9c
     }
   }
   expect(seen).toBe(true)

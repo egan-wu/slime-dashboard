@@ -97,10 +97,11 @@ const SLIME = {
   // settle again on landing.
   air: ['..BB..', '.BHMB.', 'DEMMED', 'DBBBBD', '.DDDD.'],
   sleep: ['.BHMB.', 'DBMMBD', 'DBBBBD'],
-  // Jaw dropped wide over a blob of goo just ahead: K the open mouth, R the tongue.
-  gape: ['.BHMB.', 'DEMMED', 'DKKKKD', 'DBRRBD'],
+  // Jaw dropped wide over a blob of goo just ahead, stretching it two rows
+  // taller: K the open mouth, R the tongue.
+  gape: ['.BHMB.', 'DEMMED', 'DKKKKD', 'DKKKKD', 'DKRRKD', 'DBBBBD'],
 }
-const MOUTH = { K: 0x2b0f1e, R: 0xff7a9c }
+const MOUTH = { K: 0xffffff, R: 0xff7a9c }
 // A subagent's little slime, trailing the main one: a 2x2 ball in the air
 // that flattens on landing and springs back.
 const MINI = { ball: ['BB', 'BB'], flat: ['BBBB'] }
