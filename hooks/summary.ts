@@ -1,4 +1,4 @@
-// A subagent's task summary laid out for the Sub-agent Monitor: wrapped to
+// A subagent's task summary laid out for the Party: wrapped to
 // the pane's width so every line after the first hangs under the first's text.
 
 // The model has its own line above, so a family name in the task's words

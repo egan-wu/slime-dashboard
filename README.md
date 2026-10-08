@@ -19,7 +19,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 1 | `■:Haiku ■:Sonnet ■:Opus ■:Fable` | Switches the session's model (`/model haiku`, …): each family's newest model. |
 | 2 | Property `[ ▲ ]` | Opens or closes the session's figures (7–9 below, then cache hit rate, tokens used, iterations, latest turn's time). |
 | 3 | Skill Box `[ ▲ ]` | Opens or closes the skill box (10–12). |
-| 4 | Sub-agent Monitor `[ ▲ ]` | Opens or closes the running subagents; closed, the title counts them. |
+| 4 | Party `[ ▲ ]` | Opens or closes the running subagents; closed, the title counts them. |
 | 5 | Event Message `[ ▲ ]` | Opens or closes the newest three events; closed, the title counts them. |
 | 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–18). |
 | 7 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
@@ -29,8 +29,8 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 11 | `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | 12 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | 13 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked at start and every 30 minutes). |
-| 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Sub-agent Monitor, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
-| 15 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and the monitor, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
+| 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Party, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
+| 15 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and Party, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | 16 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | 17 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
 | 18 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |

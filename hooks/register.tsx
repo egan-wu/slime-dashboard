@@ -92,7 +92,7 @@ const iterationAtom = atom({ plugin: 'slime-dashboard', key: 'iteration' } as co
 const effortAtom = atom({ plugin: 'slime-dashboard', key: 'effort' } as const, '')
 // The Event Message block's events, newest first.
 const eventsAtom = atom({ plugin: 'slime-dashboard', key: 'events' } as const, [] as SlimeEvent[])
-// Whether Sub-agent Monitor and Event Message are open; like every block, both start closed.
+// Whether Party and Event Message are open; like every block, both start closed.
 const monitorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'monitorOpen' } as const, false)
 const eventsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'eventsOpen' } as const, false)
 // Whether the row of effort levels under Property's Effort is open.
@@ -770,7 +770,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {rule}
         {header(
-          monitorOpen ? 'Sub-agent Monitor' : `Sub-agent Monitor (${running.length})`,
+          monitorOpen ? 'Party' : `Party (${running.length})`,
           'monitor-toggle',
           monitorOpen,
           () => update($, monitorOpenAtom, o => !o),
