@@ -61,6 +61,10 @@ const skillCatsClosedAtom = atom({ plugin: 'slime-dashboard', key: 'skillCatsClo
 const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as const, false)
 // The Setting block: open or not, and what the last Update said ('' before one).
 const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' } as const, false)
+// Setting's Display: whether its box is open, and the sections hidden from the
+// pane (kept in the store across sessions).
+const displayOpenAtom = atom({ plugin: 'slime-dashboard', key: 'displayOpen' } as const, false)
+const hiddenAtom = atom({ plugin: 'slime-dashboard', key: 'hidden' } as const, [] as string[])
 const updateStatusAtom = atom({ plugin: 'slime-dashboard', key: 'updateStatus' } as const, '')
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
@@ -83,6 +87,18 @@ const turnStartedAtAtom = atom({ plugin: 'slime-dashboard', key: 'turnStartedAt'
 
 const SKILL_ROWS = 5
 const SKILLS_KEY = 'skills'
+const HIDDEN_KEY = 'hidden'
+// The sections Display can hide, top to bottom; Setting itself always shows,
+// so a hidden section can always be brought back.
+const SECTIONS = [
+  { id: 'stats', label: 'HP / MP / CP' },
+  { id: 'scene', label: 'Slime' },
+  { id: 'models', label: 'Model buttons' },
+  { id: 'property', label: 'Property' },
+  { id: 'skills', label: 'Skill Box' },
+  { id: 'monitor', label: 'Sub-agent Monitor' },
+  { id: 'events', label: 'Event Message' },
+] as const
 // Tools whose call itself waits on the person.
 const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
 // Notifications that mean the person is asked: a permission dialog, an MCP elicitation.
@@ -169,6 +185,19 @@ const partyTick = () => (partyAt === undefined ? undefined : tick - partyAt)
 const OUT: ReadonlySet<AgentStatus> = new Set(['pending', 'running', 'waiting', 'idle'])
 
 // Writing down an event never gets in the way of what it describes.
+async function toggleSection($: EngineInterface, id: string) {
+  const hidden = await read($, hiddenAtom)
+  const next = hidden.includes(id) ? hidden.filter(h => h !== id) : [...hidden, id]
+  await update($, hiddenAtom, () => next)
+  await $.store.set(HIDDEN_KEY, next)
+}
+
+// Setting's Reload: load the dashboard afresh, as a save to its files would.
+async function reloadDashboard($: EngineInterface) {
+  await logEvent($, 'Reloaded the dashboard')
+  await $.command.run({ command: 'reload-plugins' })
+}
+
 async function logEvent($: EngineInterface, text: string) {
   try {
     const at = await $.clock.now()
@@ -449,6 +478,8 @@ export const register: Register = on => {
       argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather]',
     })
     const kept = await $.store.get(SKILLS_KEY)
+    const hiddenKept = await $.store.get(HIDDEN_KEY)
+    if (Array.isArray(hiddenKept)) await update($, hiddenAtom, () => hiddenKept.filter((h): h is string => typeof h === 'string'))
     // Names kept before categories come back filed under General.
     await update($, skillsAtom, () => skillsFrom(kept))
     waiting = await read($, waitingAtom)
@@ -688,6 +719,9 @@ export const register: Register = on => {
     const settingsOpen = await read($, settingsOpenAtom)
     const updateStatus = await read($, updateStatusAtom)
     const behind = await read($, behindAtom)
+    const displayOpen = await read($, displayOpenAtom)
+    const hidden = await read($, hiddenAtom)
+    const shown = (id: string) => !hidden.includes(id)
     const setting = (
       <Box flexDirection="column">
         {rule}
@@ -703,6 +737,30 @@ export const register: Register = on => {
             {updateStatus !== '' && (
               <Text dimColor wrap="wrap">{`  ${updateStatus}`}</Text>
             )}
+            {displayOpen ? (
+              // Open, Display is a rounded box with its button at the top left
+              // (pressed again, it closes) over a checkbox for each section.
+              <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} marginLeft={1} width={Math.max(8, (columns || OPEN.columns) - 2)}>
+                <Button key="display" label="[Display]" plain onPress={() => update($, displayOpenAtom, o => !o)} />
+                {SECTIONS.map(section => (
+                  <Button
+                    key={`display-${section.id}`}
+                    label={`${hidden.includes(section.id) ? '[ ]' : '[x]'} ${section.label}`}
+                    plain
+                    onPress={() => toggleSection($, section.id)}
+                  />
+                ))}
+              </Box>
+            ) : (
+              <Box flexDirection="row" marginLeft={2}>
+                <Button key="display" label="[Display]" plain onPress={() => update($, displayOpenAtom, o => !o)} />
+                <Text dimColor>: choose sections</Text>
+              </Box>
+            )}
+            <Box flexDirection="row" marginLeft={2}>
+              <Button key="reload" label="[Reload]" plain onPress={() => reloadDashboard($)} />
+              <Text dimColor>: reload dashboard</Text>
+            </Box>
           </Box>
         )}
         {/* The version, at the pane's foot to the right, in a muted slate blue. */}
@@ -956,8 +1014,8 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
-          {stats}
-          <Box flexDirection="column">
+          {shown('stats') && stats}
+          {shown('scene') && <Box flexDirection="column">
             <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting })} />
             {isWaiting && (
               // The bubble's question mark, bold, laid over its middle cell.
@@ -967,12 +1025,12 @@ export const register: Register = on => {
                 </Text>
               </Box>
             )}
-          </Box>
-          {picker}
-          {property}
-          {skillBox}
-          {monitor}
-          {eventMessage}
+          </Box>}
+          {shown('models') && picker}
+          {shown('property') && property}
+          {shown('skills') && skillBox}
+          {shown('monitor') && monitor}
+          {shown('events') && eventMessage}
           {setting}
         </Box>
       )
@@ -980,13 +1038,13 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        {stats}
-        {line}
-        {picker}
-        {property}
-        {skillBox}
-        {monitor}
-        {eventMessage}
+        {shown('stats') && stats}
+        {shown('scene') && line}
+        {shown('models') && picker}
+        {shown('property') && property}
+        {shown('skills') && skillBox}
+        {shown('monitor') && monitor}
+        {shown('events') && eventMessage}
         {setting}
       </Box>
     )

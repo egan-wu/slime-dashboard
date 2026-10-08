@@ -375,3 +375,37 @@ test('every block shows ▲ while closed and ▼ while open', async ($, on) => {
     await ui.unmount()
   }
 })
+
+test('Setting: Display hides and shows sections, Reload reloads the dashboard', async ($, on) => {
+  mock.store(on)
+  const reloads: string[] = []
+  on('command.run', { command: 'reload-plugins' }, async () => {
+    reloads.push('reload')
+    return { text: '' }
+  })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'settings-toggle' })
+    expect(await ui.find({ key: 'display-property' })).toBeUndefined()
+    await ui.press({ key: 'display' })
+    expect((await ui.find({ key: 'display-property' }))?.text).toBe('[x] Property')
+
+    expect(await ui.find({ key: 'props-toggle' })).toBeDefined()
+    await ui.press({ key: 'display-property' })
+    expect((await ui.find({ key: 'display-property' }))?.text).toBe('[ ] Property')
+    expect(await ui.find({ key: 'props-toggle' })).toBeUndefined()
+    await ui.press({ key: 'display-property' })
+    expect(await ui.find({ key: 'props-toggle' })).toBeDefined()
+
+    // Pressed again, [Display] closes its box.
+    await ui.press({ key: 'display' })
+    expect(await ui.find({ key: 'display-property' })).toBeUndefined()
+    await ui.press({ key: 'settings-toggle' })
+    await ui.unmount()
+  }
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'settings-toggle' })
+  await ui.press({ key: 'reload' })
+  expect(reloads).toEqual(['reload'])
+  await ui.unmount()
+})

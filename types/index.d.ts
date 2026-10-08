@@ -34,6 +34,8 @@ declare module 'claude-code' {
       monitorOpen: boolean
       eventsOpen: boolean
       settingsOpen: boolean
+      displayOpen: boolean
+      hidden: string[]
       updateStatus: string
       behind: boolean
     }

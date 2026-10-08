@@ -21,7 +21,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 3 | Skill Box `[ ▲ ]` | Opens or closes the skill box (10–12). |
 | 4 | Sub-agent Monitor `[ ▼ ]` | Opens or closes the running subagents; closed, the title counts them. |
 | 5 | Event Message `[ ▼ ]` | Opens or closes the newest three events; closed, the title counts them. |
-| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13). |
+| 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–15). |
 | 7 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
 | 8 | Effort `[High]` | Opens the row of levels (9). |
 | 9 | `[Low][Mid][High][xHigh][Max]` | Picking a level runs `/effort` with it and closes the row. |
@@ -29,6 +29,8 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 11 | `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; each shows five rows at a time, `▲ ▼` scroll the rest. |
 | 12 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | 13 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session. A red `!` before it means GitHub has a newer version than the one running (checked at start and every 30 minutes). |
+| 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Sub-agent Monitor, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
+| 15 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
 
 ## What it shows
 
