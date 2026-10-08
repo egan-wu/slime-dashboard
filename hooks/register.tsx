@@ -45,6 +45,11 @@ const PICKS = [
   { label: 'Fable', id: 'fable' },
 ]
 
+// The red of Party's [x], which stops a subagent. A Button's label takes no
+// color at rest, so the brackets around it carry the red, and the x turns red
+// under the pointer.
+const STOP_RED = 0xe63946
+
 const busyAtom = atom({ plugin: 'slime-dashboard', key: 'busy' } as const, false)
 const modelAtom = atom({ plugin: 'slime-dashboard', key: 'model' } as const, '')
 const minionsAtom = atom({ plugin: 'slime-dashboard', key: 'minions' } as const, [] as SlimeMinion[])
@@ -265,7 +270,9 @@ const agentLine = (m: { model: string; description?: string }) =>
 
 async function checkMinions($: EngineInterface) {
   if (!minions.some(m => !m.done)) return
-  const out = new Set((await $.agent.list()).filter(a => OUT.has(a.status)).map(a => a.id))
+  const agents = await $.agent.list()
+  const out = new Set(agents.filter(a => OUT.has(a.status)).map(a => a.id))
+  const killed = new Set(agents.filter(a => a.status === 'killed').map(a => a.id))
   const finished = minions.filter(m => !m.done && !out.has(m.id))
   if (finished.length === 0) return
   const cx = homeCx(columns || OPEN.columns)
@@ -277,8 +284,19 @@ async function checkMinions($: EngineInterface) {
     pos.delete(m.id)
   }
   await setMinions($, list => list.map(m => (finished.includes(m) ? { ...m, done: true } : m)))
-  for (const m of finished) await logEvent($, `✔ Finished ${agentLine(m)}`)
+  for (const m of finished) await logEvent($, `${killed.has(m.id) ? '✖ Stopped' : '✔ Finished'} ${agentLine(m)}`)
   if (!minions.some(m => !m.done) && partyAt === undefined) partyAt = tick
+}
+
+// Party's [x]: stop that subagent with TaskStop, under the same permission
+// check as the model's own call; its slime then drops out as any finished one.
+async function stopMinion($: EngineInterface, id: string) {
+  try {
+    await $.tool.call({ tool: 'TaskStop', task_id: id })
+  } catch {
+    // Already gone, or the stop was refused: nothing more to do.
+  }
+  await checkMinions($).catch(() => {})
 }
 
 // The chest is behind them and the little one has merged: it is gone.
@@ -782,10 +800,21 @@ export const register: Register = on => {
             const who = modelInfo(m.model)
             return (
               <Box key={`agent-${m.id}`} flexDirection="column">
-                <Text>
-                  {' - '}
-                  <Text color={hex(who.body)}>{who.name}</Text>
-                </Text>
+                <Box flexDirection="row">
+                  <Text>
+                    {' - '}
+                    <Text color={hex(who.body)}>{who.name}</Text>{' '}
+                    <Text color={hex(STOP_RED)}>[</Text>
+                  </Text>
+                  <Button
+                    key={`stop-${m.id}`}
+                    label="x"
+                    plain
+                    hover={{ color: hex(STOP_RED), bold: true }}
+                    onPress={() => stopMinion($, m.id)}
+                  />
+                  <Text color={hex(STOP_RED)}>]</Text>
+                </Box>
                 {wrapSummary(cleanSummary(m.description || 'subagent'), width).map((line, i) => (
                   <Text dimColor wrap="truncate-end">{`${i === 0 ? INDENT : HANG}${line}`}</Text>
                 ))}

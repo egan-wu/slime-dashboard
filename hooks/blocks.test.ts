@@ -499,3 +499,30 @@ test('Setting: Width asks for the pane a column narrower or wider', async ($, on
   expect(asked.slice(-3)).toEqual([34, 35, 34])
   await ui.unmount()
 })
+
+test("Party's red [x] stops that subagent with TaskStop, and it leaves the line", async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  const stopped: string[] = []
+  on('agent.spawn', async () => ({ agentId: 'a1', model: 'claude-haiku-5-5' }))
+  on('agent.list', async () => ({
+    value: [{ id: 'a1', description: 'scan files', status: stopped.includes('a1') ? 'killed' : 'running' }],
+  }) as never)
+  on('tool.call', { tool: 'TaskStop' }, async (_$, e) => {
+    stopped.push((e as { task_id: string }).task_id)
+    return { result: 'stopped' } as never
+  })
+  await $.agent.spawn({ prompt: 'Scan.', description: 'scan files' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const shown = async (text: string) => (await ui.findAll({ type: 'Text' })).some(t => t.text?.includes(text))
+  await ui.press({ key: 'monitor-toggle' })
+  expect(await shown('scan files')).toBe(true)
+  const red = (await ui.findAll({ type: 'Text' })).filter(t => t.props.color === '#e63946').map(t => t.text)
+  expect(red).toEqual(['[', ']'])
+  await ui.press({ key: 'stop-a1' })
+  expect(stopped).toEqual(['a1'])
+  expect(await shown('scan files')).toBe(false)
+  await ui.press({ key: 'events-toggle' })
+  expect(await shown('✖ Stopped')).toBe(true)
+  await ui.unmount()
+})

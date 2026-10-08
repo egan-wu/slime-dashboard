@@ -19,7 +19,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 1 | `■:Haiku ■:Sonnet ■:Opus ■:Fable` | Switches the session's model (`/model haiku`, …): each family's newest model. |
 | 2 | Property `[ ▲ ]` | Opens or closes the session's figures (7–9 below, then cache hit rate, tokens used, iterations, latest turn's time). |
 | 3 | Skill Box `[ ▲ ]` | Opens or closes the skill box (10–12). |
-| 4 | Party `[ ▲ ]` | Opens or closes the running subagents; closed, the title counts them. |
+| 4 | Party `[ ▲ ]` | Opens or closes the running subagents; closed, the title counts them. A red `[x]` beside each one stops that subagent (TaskStop), and Event Message logs it as Stopped. |
 | 5 | Event Message `[ ▲ ]` | Opens or closes the newest three events; closed, the title counts them. |
 | 6 | Setting `[ ▲ ]` | Opens or closes the settings (13–18). |
 | 7 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
