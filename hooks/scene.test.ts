@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EMERGE_TICKS, frame, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
+import { EMERGE_TICKS, frame, GOO_COLORS, goos, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
 import type { Offsets } from './scene'
 import { parseWeather } from './weather'
 
@@ -156,4 +156,29 @@ test('trees come in three kinds, picked at random but steady per spot', async ()
   const kinds = scattered('tree', 0, 4000).map(treeKind)
   expect(new Set(kinds)).toEqual(new Set([0, 1, 2]))
   expect(scattered('tree', 0, 4000).map(treeKind)).toEqual(kinds)
+})
+
+test('goo: blobs lie on the road clear of rocks, and the slime gapes at and eats each one', async () => {
+  const blobs = goos(0, 2000)
+  expect(blobs.length).toBeGreaterThan(50)
+  expect(goos(100, 400)).toEqual(goos(100, 400))
+  for (const x of blobs) expect(scattered('rock', x - 5, x + 3)).toEqual([])
+  const W = 40
+  const off = fresh()
+  let gaped = false
+  let seen = false
+  for (let t = 0; t < 400; t++) {
+    step(off, true)
+    const words = new Uint32Array(Uint8Array.from(atob(frame(W, off, t, true, 'claude-opus-5-5')), c => c.charCodeAt(0)).buffer)
+    for (let i = 0; i < words.length; i += 3) {
+      const col = (i / 3) % W
+      const goo = (GOO_COLORS as readonly number[]).some(c => c === words[i + 1] || c === words[i + 2])
+      // Nothing it has passed is left lying behind it.
+      if (goo) expect(col).toBeGreaterThan(W - 8 + 2)
+      seen ||= goo
+      gaped ||= words[i + 1] === 0x2b0f1e || words[i + 2] === 0x2b0f1e
+    }
+  }
+  expect(seen).toBe(true)
+  expect(gaped).toBe(true)
 })

@@ -97,7 +97,10 @@ const SLIME = {
   // settle again on landing.
   air: ['..BB..', '.BHMB.', 'DEMMED', 'DBBBBD', '.DDDD.'],
   sleep: ['.BHMB.', 'DBMMBD', 'DBBBBD'],
+  // Jaw dropped wide over a blob of goo just ahead: K the open mouth, R the tongue.
+  gape: ['.BHMB.', 'DEMMED', 'DKKKKD', 'DBRRBD'],
 }
+const MOUTH = { K: 0x2b0f1e, R: 0xff7a9c }
 // A subagent's little slime, trailing the main one: a 2x2 ball in the air
 // that flattens on landing and springs back.
 const MINI = { ball: ['BB', 'BB'], flat: ['BBBB'] }
@@ -170,6 +173,33 @@ export function scattered(layer: 'tree' | 'rock', from: number, to: number): num
   }
   return found
 }
+
+// Blobs of goo in every color lie along the road, as rocks do but closer
+// together and never on a rock. The slime eats each one it reaches (its
+// context filling up), so none is ever drawn behind it; unloading, it spits
+// them back out (UNLOAD_COLORS.pixels).
+export const GOO_COLORS = [0xff595e, 0xff924c, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93, 0xff70a6] as const
+const GOO_SCATTER = { span: 18, jitter: 12, skip: 3, seed: 0x900 }
+// A blob is a plain 2x2 block, spat out or lying on the road.
+const GOO = ['GG', 'GG']
+const GOO_W = 2
+// Columns ahead of the slime at which it opens wide for the next blob.
+const GAPE_REACH = 3
+
+// World x (in the rocks' frame) of every blob whose left edge lies in [from, to).
+export function goos(from: number, to: number): number[] {
+  const sc = GOO_SCATTER
+  const found: number[] = []
+  for (let k = Math.floor(from / sc.span) - 1; k * sc.span < to; k++) {
+    if (Math.floor(unit(k, sc.seed) * sc.skip) === 0) continue
+    const x = k * sc.span + Math.floor(unit(k, sc.seed * 3 + 1) * sc.jitter)
+    if (x < from || x >= to) continue
+    if (scattered('rock', x - ROCK_W - 1, x + GOO_W + 1).length > 0) continue
+    found.push(x)
+  }
+  return found
+}
+export const gooColor = (worldX: number) => GOO_COLORS[Math.floor(unit(worldX, 0x6c0) * GOO_COLORS.length)]!
 
 // Each band repeats every `span` pixels so scrolling wraps seamlessly.
 const BANDS: Band[] = [
@@ -368,12 +398,12 @@ export const POTION_COLORS = {
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
 // Unloading (the context compacting): the slime sets its load down. Every
-// few ticks its body flashes green and it spits a spray of colored pixels out
+// few ticks its body flashes green and it spits a spray of the goo it ate out
 // of its back, which arc off to the left, land and vanish; green arrows fall
 // beside it, until the compaction ends.
 export const UNLOAD_COLORS = {
   glow: { B: 0x7ae582, H: 0xd8f8dc, M: 0xa8eeb0, D: 0x38b000 },
-  pixels: [0xff595e, 0xff924c, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93, 0xff70a6],
+  pixels: GOO_COLORS,
   arrow: 0x38b000,
 } as const
 // Ticks between sprays, sprays in the air at once, and ticks each one flies.
@@ -546,6 +576,19 @@ export function frame(
   }
 
   const mainLeft = cx - (SLIME.awake[0]!.length >> 1)
+  // Goo lies only ahead of the slime: whatever it has reached, it has eaten.
+  // The nearest blob's distance from its front decides whether it gapes.
+  const mainFront = mainLeft + SLIME.awake[0]!.length - 1
+  let nextGoo = Infinity
+  if (!fete) {
+    const at = Math.floor(off.rock)
+    for (const worldX of goos(at - GOO_W + 1, at + w)) {
+      const x = worldX - at
+      if (x <= mainFront) continue
+      nextGoo = Math.min(nextGoo, x - mainFront)
+      draw({ rows: GOO, colors: { G: gooColor(worldX) } }, x, GROUND_Y - 1)
+    }
+  }
   let line = 0
   minions.forEach(f => {
     const m = typeof f === 'string' ? f : f.model
@@ -612,7 +655,10 @@ export function frame(
     // Standing still, nothing passes beneath it: it stays on the ground.
     const lift = travelling ? rockLift(left, width, rocks) : 0
     const unloading = face.unloading === true
-    const rows = !travelling
+    const gaping = travelling && lift === 0 && nextGoo <= GAPE_REACH
+    const rows = gaping
+      ? SLIME.gape
+      : !travelling
       ? SLIME.awake
       : lift > 0
         ? SLIME.air
@@ -633,13 +679,13 @@ export function frame(
           const n = UNLOAD_COLORS.pixels.length
           const color = UNLOAD_COLORS.pixels[(((spray * SPRAY.length + p) % n) + n) % n]!
           const x = Math.round(left + 1 - far * k)
-          draw({ rows: ['P'], colors: { P: color } }, x, bottom - 1 - Math.round(Math.sin(k * Math.PI) * high))
+          draw({ rows: GOO, colors: { G: color } }, x, bottom - 1 - Math.round(Math.sin(k * Math.PI) * high))
         })
       }
     }
     // It flashes green as each spray leaves it.
     const glowing = unloading && tick % SPIT_EVERY < 2
-    const body = glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint
+    const body = { ...(glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint), ...MOUTH }
     draw({ rows, colors: body }, left, bottom)
     // The face goes over the eyes as characters, as the sleeping eyes do: a
     // cell holds the eye pixel and the body pixel beside it, so the
