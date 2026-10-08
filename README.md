@@ -8,7 +8,9 @@ Each section below can be hidden or moved with Setting's `[Display]` and `[Order
 
 <img src="docs/session.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners">
 
-At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename shows after the next one.
+At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename typed at the prompt shows after the next one.
+
+The sign is also a button. Pressed, it opens a field under it; type a new name, then press the sign again to run `/rename` with it. Enter only keeps the text. A field left empty or unchanged closes without renaming, and `[x]` beside it closes it too. A rename is logged in Event Message as `Renamed: old → new`, so a wrong one can be undone by renaming back.
 
 ## HP / MP / CP, the slime and the model buttons
 

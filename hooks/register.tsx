@@ -58,6 +58,9 @@ const weatherAtom = atom({ plugin: 'slime-dashboard', key: 'weather' } as const,
 // Claude Code made up.
 const SIGN = { edge: '#5c3a1e', board: '#8b5a2b', text: '#f5e6c8' }
 const sessionTitleAtom = atom({ plugin: 'slime-dashboard', key: 'sessionTitle' } as const, '')
+// Pressing the sign opens a field under it for a new name (renameDraft).
+const renameOpenAtom = atom({ plugin: 'slime-dashboard', key: 'renameOpen' } as const, false)
+const renameDraftAtom = atom({ plugin: 'slime-dashboard', key: 'renameDraft' } as const, '')
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
 // True while the session waits on the person: a permission prompt or a question.
 const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const, false)
@@ -146,6 +149,25 @@ async function readSessionTitle($: EngineInterface) {
   if (run?.exitCode !== 0) return
   const named = titleFrom(run.stdout)
   if (named) await setSessionTitle($, named)
+}
+
+// The sign pressed: closed, it opens the field holding the current name;
+// open, it renames the session with /rename to what the field holds and
+// closes. A field left empty or unchanged just closes, renaming nothing,
+// and Event Message keeps the old name, should a rename need undoing.
+async function pressSign($: EngineInterface) {
+  if (!(await read($, renameOpenAtom))) {
+    await update($, renameDraftAtom, () => '')
+    await update($, renameOpenAtom, () => true)
+    return
+  }
+  const old = await read($, sessionTitleAtom)
+  const next = (await read($, renameDraftAtom)).trim()
+  await update($, renameOpenAtom, () => false)
+  if (!next || next === old) return
+  await $.command.run({ command: 'rename', args: next })
+  await update($, sessionTitleAtom, () => next)
+  await logEvent($, `Renamed: ${old || '—'} → ${next}`)
 }
 
 async function setSessionTitle($: EngineInterface, title: string | undefined) {
@@ -1233,12 +1255,29 @@ export const register: Register = on => {
       </Box>
     )
     const title = await read($, sessionTitleAtom)
-    // The session's name on a wooden sign: a rounded brown frame, cream letters.
+    const renaming = await read($, renameOpenAtom)
+    const draft = await read($, renameDraftAtom)
+    // The session's name on a wooden sign: a rounded brown frame; the name is
+    // a button that opens a field to rename it, then renames on a second press.
     const session = (
-      <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
-        <Text bold color={SIGN.text} backgroundColor={SIGN.board} wrap="truncate-end">
-          {title || '—'}
-        </Text>
+      <Box flexDirection="column">
+        <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
+          <Button key="sign" label={title || '—'} plain hover={{ color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+        </Box>
+        {renaming && Input && (
+          <Box flexDirection="row">
+            <Input
+              key="rename"
+              label="›"
+              placeholder="new name, then press the sign"
+              submitLabel="keep"
+              value={draft}
+              onInput={(value: string) => update($, renameDraftAtom, () => value)}
+              onSubmit={(value: string) => update($, renameDraftAtom, () => value)}
+            />
+            <Button key="rename-cancel" label="[x]" plain onPress={() => update($, renameOpenAtom, () => false)} />
+          </Box>
+        )}
       </Box>
     )
     const rest = { session, stats, models: picker, property, skills: skillBox, monitor, events: eventMessage }

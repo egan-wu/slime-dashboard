@@ -533,13 +533,47 @@ test('the session name stands on a wooden sign, updated by each prompt, /rename 
   mock.store(on)
   on('classic.UserPromptSubmit', async () => ({}))
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  const shown = async (text: string) => (await ui.findAll({ type: 'Text' })).some(t => t.text === text)
+  const shown = async (text: string) => (await ui.find({ type: 'Button', key: 'sign' }))?.props.label === text
   expect(await shown('—')).toBe(true)
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Slim-dashboard 動畫互動' } as never)
   expect(await shown('Slim-dashboard 動畫互動')).toBe(true)
-  // On a wooden sign: cream letters on brown.
-  expect((await ui.find({ type: 'Text', text: 'Slim-dashboard 動畫互動' }))?.props).toMatchObject({ color: '#f5e6c8', backgroundColor: '#8b5a2b' })
+
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'renamed' } as never)
   expect(await shown('renamed')).toBe(true)
+  await ui.unmount()
+})
+
+test('the sign renames the session: press, type, press again; empty, unchanged or [x] renames nothing', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  const renamed: string[] = []
+  on('command.run', { command: 'rename' }, async (_$, e) => {
+    renamed.push(e.args)
+    return { text: '' }
+  })
+  on('classic.UserPromptSubmit', async () => ({}))
+  await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'old name' } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const field = async () => (await ui.findAll({ type: 'Input' })).length
+  expect(await field()).toBe(0)
+  // Opened and pressed again with nothing typed: closes, renames nothing.
+  await ui.press({ key: 'sign' })
+  expect(await field()).toBe(1)
+  await ui.press({ key: 'sign' })
+  expect(await field()).toBe(0)
+  // [x] closes without renaming.
+  await ui.press({ key: 'sign' })
+  await ui.input({ key: 'rename', text: 'oops' })
+  await ui.press({ key: 'rename-cancel' })
+  expect(await field()).toBe(0)
+  expect(renamed).toEqual([])
+  // Typed and pressed again: /rename, the sign follows, the old name is logged.
+  await ui.press({ key: 'sign' })
+  await ui.input({ key: 'rename', text: '  new name ' })
+  await ui.press({ key: 'sign' })
+  expect(renamed).toEqual(['new name'])
+  expect((await ui.find({ type: 'Button', key: 'sign' }))?.props).toMatchObject({ label: 'new name' })
+  await ui.press({ key: 'events-toggle' })
+  expect((await ui.findAll({ type: 'Text' })).some(t => t.text?.includes('Renamed: old name → new name'))).toBe(true)
   await ui.unmount()
 })

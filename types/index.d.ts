@@ -24,6 +24,8 @@ declare module 'claude-code' {
     'slime-dashboard': {
       busy: boolean; model: SlimeModel; minions: SlimeMinion[]; weather: SlimeWeather; vitals: SlimeVitals
       sessionTitle: string
+      renameOpen: boolean
+      renameDraft: string
       waiting: boolean
       skills: SlimeSkill[]
       skillsOpen: boolean
