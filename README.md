@@ -26,7 +26,7 @@ The numbers match the yellow badges in the pictures. Every button also works fro
 | 8 | Effort `[High]` | Opens the row of levels (9). |
 | 9 | `[Low][Mid][High][xHigh][Max]` | Picking a level runs `/effort` with it and closes the row. |
 | 10 | Prompt for skill | Type here; the next skill you press is sent with it. Enter keeps the text, it does not send. |
-| 11 | `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; each shows five rows at a time, `▲ ▼` scroll the rest. |
+| 11 | `▼ General` / `▲ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | 12 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | 13 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked at start and every 30 minutes). |
 | 14 | `[Display]` | Opens a rounded box of checkboxes, one per section (HP / MP / CP, Slime, Model buttons, Property, Skill Box, Sub-agent Monitor, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |

@@ -1047,24 +1047,33 @@ export const register: Register = on => {
     const categories = groups.map(g => {
       const isOpen = !closed.includes(g.category)
       const top = topOf(g)
-      return (
-        <Box key={`skillcat-box-${g.category}`} flexDirection="column">
-          <Box flexDirection="row">
-            <Button
-              key={`skillcat-${g.category}`}
-              label={`${isOpen ? '▼' : '▲'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
-              plain
-              onPress={() => toggleCategory(g.category)}
-            />
+      const toggle = (
+        <Button
+          key={`skillcat-${g.category}`}
+          label={`${isOpen ? '▼' : '▲'} ${isOpen ? g.category : `${g.category} (${g.skills.length})`}`}
+          plain
+          onPress={() => toggleCategory(g.category)}
+        />
+      )
+      // Closed, a category is its button alone; open, a rounded box like
+      // Setting's Display, its button at the top over its skills.
+      if (!isOpen) {
+        return (
+          <Box key={`skillcat-box-${g.category}`} flexDirection="row" marginLeft={2}>
+            {toggle}
           </Box>
-          {isOpen &&
-            g.skills.slice(top, top + SKILL_ROWS).map(skill => (
-              <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
-                <Button key={`skill-${skill.name}`} label={`[${skill.name}]`} plain onPress={() => runSkill($, skill)} />
-                {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
-              </Box>
-            ))}
-          {isOpen && g.skills.length > SKILL_ROWS && (
+        )
+      }
+      return (
+        <Box key={`skillcat-box-${g.category}`} flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
+          {toggle}
+          {g.skills.slice(top, top + SKILL_ROWS).map(skill => (
+            <Box key={`skill-row-${skill.name}`} flexDirection="row" marginLeft={2}>
+              <Button key={`skill-${skill.name}`} label={`[${skill.name}]`} plain onPress={() => runSkill($, skill)} />
+              {skill.description && <Text dimColor wrap="truncate-end">{`: ${skill.description}`}</Text>}
+            </Box>
+          ))}
+          {g.skills.length > SKILL_ROWS && (
             <Box flexDirection="row" gap={1} marginLeft={2}>
               <Button key={`skills-up-${g.category}`} label="▲" plain onPress={() => scroll(g, -1)} />
               <Button key={`skills-down-${g.category}`} label="▼" plain onPress={() => scroll(g, 1)} />
