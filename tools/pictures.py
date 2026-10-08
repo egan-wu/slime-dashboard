@@ -309,9 +309,10 @@ with open(os.path.join(HOOKS, 'version.ts')) as f:
 if not shutil.which('node'):
     sys.exit('needs node 22+ on PATH')
 cells = scenes()
-for old in ('idle', 'busy', 'top'):
+for old in ('idle', 'busy'):
     if os.path.exists(os.path.join(DOCS, f'{old}.png')):
         os.remove(os.path.join(DOCS, f'{old}.png'))
+render('top', top_rows(), cells['walkingFrames'][0])
 render_gif('top', top_rows(), cells['walkingFrames'])
 render('asleep', waiting_rows(), cells['asleep'])
 render('waiting', waiting_rows(), cells['waiting'], ask=True)

@@ -1,8 +1,20 @@
 # slime-dashboard
 
-A Claude Code side pane in the spirit of the offline dino game, starring a slime. It travels while Claude works and sleeps while Claude waits; each subagent is a little slime following it. Around the scene are your usage limits, the session's figures, a box of skills to run with one press, the subagents at work and what just happened.
+A pixel-art slime that lives in Claude Code's side pane. It crawls along while Claude works and naps while Claude waits, with your usage limits, context, subagents and recent events all around it, at a glance.
 
-Each section below can be hidden or moved with Setting's `[Display]` and `[Order]`. Every button also works from the keyboard: ctrl+x tab, or a click, gives the pane the keys, then Tab walks the buttons and Enter presses one. Each section's title button (`[ ▼ ]` while open, `[ ▲ ]` while closed) opens or closes it; closed, Party and Event Message count what they hold in their titles.
+<img src="docs/top.gif" width="420" alt="The pane at work: HP, MP and CP bars over a red slime crawling past trees, rocks and goo, two little subagent slimes hopping behind it">
+
+## Install
+
+At a Claude Code prompt in a terminal:
+
+```
+/plugin install slime-dashboard --marketplace egan-wu/slime-dashboard
+```
+
+Answer `y` to add the marketplace, then pick a scope. The pane opens by itself when the terminal is 144 columns wide or more; in a narrower terminal, or after closing it, type `/slime-dashboard` to open it. It docks on the right only in Claude Code's fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`, 110 columns or more); otherwise it sits above the prompt.
+
+To update later, press `[Update]` under [Setting](#setting).
 
 ## Session
 
@@ -14,7 +26,7 @@ The sign is also a button. Pressed, it opens a field under it; type a new name, 
 
 ## HP / MP / CP, the slime and the model buttons
 
-<img src="docs/top.gif" width="340" alt="HP 23%, MP 70%, CP 62%; the red Opus slime crawls along as trees, rocks and goo roll by, a yellow and a blue little slime hopping behind it; the model buttons below">
+<img src="docs/top.png" width="340" alt="HP 23%, MP 70%, CP 62%; the red Opus slime walks past an orange tree, a yellow and a blue little slime behind it; the model buttons below">
 
 - **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, shading from light to dark grey.
 - **The slime** travels while Claude works, past clouds, birds, trees (round green, pine or autumn orange, at random) and rocks at their own speeds; every load opens on the same stretch of road, where a tall oval tree stands half behind an autumn one. Along the road lie 2x2 blobs of goo in every color: it stretches taller with its white mouth wide open as it reaches each one and eats it, its context filling up. Its color follows the model: Fable purple, Opus red, Sonnet blue, Haiku yellow, unless Setting's `[Color]` picked others.
@@ -81,17 +93,9 @@ The newest three events, each framed, with this computer's local time (`YYYYMMDD
 
 The plugin's version shows at the pane's foot.
 
-## Install
+## Getting around
 
-At a Claude Code prompt in a terminal:
-
-```
-/plugin install slime-dashboard --marketplace egan-wu/slime-dashboard
-```
-
-Answer `y` to add the marketplace, then pick a scope. The pane opens by itself when the terminal is 144 columns wide or more; in a narrower terminal, or after closing it, type `/slime-dashboard` to open it. It docks on the right only in Claude Code's fullscreen layout (`CLAUDE_CODE_NO_FLICKER=1`, 110 columns or more); otherwise it sits above the prompt.
-
-To update later, press `[Update]` under [Setting](#setting).
+Each section below can be hidden or moved with Setting's `[Display]` and `[Order]`. Every button also works from the keyboard: ctrl+x tab, or a click, gives the pane the keys, then Tab walks the buttons and Enter presses one. Each section's title button (`[ ▼ ]` while open, `[ ▲ ]` while closed) opens or closes it; closed, Party and Event Message count what they hold in their titles.
 
 ## Usage
 
