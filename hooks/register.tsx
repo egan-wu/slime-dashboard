@@ -10,7 +10,7 @@ import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } f
 import type { Tally } from './props'
 import { grouped, parseAdd, skillsFrom } from './skills'
 import type { Skill } from './skills'
-import { cleanSummary, wrapSummary } from './summary'
+import { cleanSummary, titleFrom, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
 import type { Vitals } from './vitals'
@@ -54,6 +54,10 @@ const modelAtom = atom({ plugin: 'slime-dashboard', key: 'model' } as const, '')
 const minionsAtom = atom({ plugin: 'slime-dashboard', key: 'minions' } as const, [] as SlimeMinion[])
 const weatherAtom = atom({ plugin: 'slime-dashboard', key: 'weather' } as const, DEFAULT_WEATHER as SlimeWeather)
 // HP, MP and CP: what is left of the usage limits, and the context window's fill.
+// The session's name as /resume lists it: the one /rename gave, else the one
+// Claude Code made up.
+const SIGN = { edge: '#5c3a1e', board: '#8b5a2b', text: '#f5e6c8' }
+const sessionTitleAtom = atom({ plugin: 'slime-dashboard', key: 'sessionTitle' } as const, '')
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
 // True while the session waits on the person: a permission prompt or a question.
 const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const, false)
@@ -131,6 +135,23 @@ let unloading = false
 // session starts; until then (or where it cannot run) event stamps use the
 // plugin environment's own zone.
 let tzOffset: number | undefined
+
+// The name from the session's transcript, for a load that has not seen a
+// prompt carry it yet: the last /rename, else the last name made up for it.
+async function readSessionTitle($: EngineInterface) {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
+  const project = (await $.session.cwd()).replace(/[^A-Za-z0-9]/g, '-')
+  const file = `${configDir}/projects/${project}/${await $.session.id()}.jsonl`
+  const run = await $.process.run(['grep', '-o', '"\\(customTitle\\|aiTitle\\)":"[^"]*"', file]).catch(() => undefined)
+  if (run?.exitCode !== 0) return
+  const named = titleFrom(run.stdout)
+  if (named) await setSessionTitle($, named)
+}
+
+async function setSessionTitle($: EngineInterface, title: string | undefined) {
+  const next = title?.trim()
+  if (next) await update($, sessionTitleAtom, () => next)
+}
 
 async function readLocalZone($: EngineInterface) {
   const run = await $.process.run(['date', '+%z']).catch(() => undefined)
@@ -577,6 +598,7 @@ export const register: Register = on => {
     }
     void openPane($)
     void readLocalZone($)
+    void readSessionTitle($)
     void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
     // GitHub is asked for a newer dashboard once a load: at session start and
@@ -713,6 +735,13 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  // Each prompt carries the session's current name, /rename's included.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    await setSessionTitle($, e.session_title).catch(() => {})
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('classic.Notification', async ($, e, next) => {
     if (ASKING_NOTICES.has(e.notification_type)) await setWaiting($, true).catch(() => {})
 
@@ -722,6 +751,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.usage) await update($, tallyAtom, t => addUsage(t, e.usage!)).catch(() => {})
     if (e.agentId === undefined) {
+      void readSessionTitle($).catch(() => {})
       await setBusy($, false)
       await setWaiting($, false)
       await update($, lastTurnMsAtom, () => e.durationMs)
@@ -1202,7 +1232,16 @@ export const register: Register = on => {
         {setting}
       </Box>
     )
-    const rest = { stats, models: picker, property, skills: skillBox, monitor, events: eventMessage }
+    const title = await read($, sessionTitleAtom)
+    // The session's name on a wooden sign: a rounded brown frame, cream letters.
+    const session = (
+      <Box flexDirection="row" justifyContent="center" borderStyle="round" borderColor={SIGN.edge} backgroundColor={SIGN.board} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
+        <Text bold color={SIGN.text} backgroundColor={SIGN.board} wrap="truncate-end">
+          {title || '—'}
+        </Text>
+      </Box>
+    )
+    const rest = { session, stats, models: picker, property, skills: skillBox, monitor, events: eventMessage }
 
     if (e.surface === 'terminal') {
       const { Raster } = $.ui.resolve(e)

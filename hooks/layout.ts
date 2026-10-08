@@ -3,6 +3,7 @@
 // moved can always be brought back.
 
 export const SECTIONS = [
+  { id: 'session', label: 'Session' },
   { id: 'stats', label: 'HP / MP / CP' },
   { id: 'scene', label: 'Slime' },
   { id: 'models', label: 'Model buttons' },
@@ -16,12 +17,15 @@ export type SectionId = (typeof SECTIONS)[number]['id']
 export const DEFAULT_ORDER: SectionId[] = SECTIONS.map(s => s.id)
 
 // A kept order, with anything unknown or repeated dropped and any section it
-// lacks (one added since it was kept) put back at its default place's end.
+// lacks (one added since it was kept) put in at its default place.
 export function orderFrom(value: unknown): SectionId[] {
   const known = new Set<string>(DEFAULT_ORDER)
   const kept = Array.isArray(value) ? value.filter((v): v is SectionId => typeof v === 'string' && known.has(v)) : []
   const order = [...new Set(kept)]
-  return [...order, ...DEFAULT_ORDER.filter(id => !order.includes(id))]
+  DEFAULT_ORDER.forEach((id, i) => {
+    if (!order.includes(id)) order.splice(Math.min(i, order.length), 0, id)
+  })
+  return order
 }
 
 // The order with `id` swapped with its neighbor `by` (-1 up, 1 down); at

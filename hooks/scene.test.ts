@@ -198,3 +198,15 @@ test('between hourly reads, day turns to night at the last read sunset', () => {
   expect(weatherNow(read, 12 * 60 * 60_000).day).toBe(false)
   expect(weatherNow(read, (13 * 60 + 30) * 60_000).day).toBe(true)
 })
+
+test('the opening scene has a tall oval green tree left of the autumn tree, gone once the road rolls', () => {
+  const W = 33
+  const green = (off: Offsets) => {
+    const words = new Uint32Array(Uint8Array.from(atob(frame(W, off, 0, false, 'claude-opus-5-5', [], { day: true, sky: 'clear' })), c => c.charCodeAt(0)).buffer)
+    let n = 0
+    for (let i = 0; i < words.length; i += 3) n += (words[i + 1] === 0x4caf50 ? 1 : 0) + (words[i + 2] === 0x4caf50 ? 1 : 0)
+    return n
+  }
+  expect(green(fresh())).toBeGreaterThan(20)
+  expect(green({ ...fresh(), tree: 200, rock: 200, ground: 200 })).toBe(0)
+})

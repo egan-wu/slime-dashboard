@@ -449,9 +449,11 @@ test('Setting: Color cycles a family through six colors; Default puts them back'
 test('Order: a kept order is cleaned up, and a move swaps neighbors', () => {
   expect(orderFrom(undefined)).toEqual(DEFAULT_ORDER)
   // Unknown and repeated ids dropped; the missing ones back at the end.
-  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['events', 'stats', 'scene', 'models', 'property', 'skills', 'monitor'])
-  expect(moveSection(DEFAULT_ORDER, 'scene', -1).slice(0, 2)).toEqual(['scene', 'stats'])
-  expect(moveSection(DEFAULT_ORDER, 'stats', -1)).toEqual(DEFAULT_ORDER)
+  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['session', 'events', 'scene', 'models', 'property', 'skills', 'monitor', 'stats'])
+  // A section added since the order was kept goes in at its default place.
+  expect(orderFrom(DEFAULT_ORDER.filter(id => id !== 'session'))).toEqual(DEFAULT_ORDER)
+  expect(moveSection(DEFAULT_ORDER, 'scene', -1).slice(1, 3)).toEqual(['scene', 'stats'])
+  expect(moveSection(DEFAULT_ORDER, 'session', -1)).toEqual(DEFAULT_ORDER)
   expect(moveSection(DEFAULT_ORDER, 'events', 1)).toEqual(DEFAULT_ORDER)
 })
 
@@ -524,5 +526,20 @@ test("Party's red [x] stops that subagent with TaskStop, and it leaves the line"
   expect(await shown('scan files')).toBe(false)
   await ui.press({ key: 'events-toggle' })
   expect(await shown('✖ Stopped')).toBe(true)
+  await ui.unmount()
+})
+
+test('the session name stands on a wooden sign, updated by each prompt, /rename included', async ($, on) => {
+  mock.store(on)
+  on('classic.UserPromptSubmit', async () => ({}))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const shown = async (text: string) => (await ui.findAll({ type: 'Text' })).some(t => t.text === text)
+  expect(await shown('—')).toBe(true)
+  await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Slim-dashboard 動畫互動' } as never)
+  expect(await shown('Slim-dashboard 動畫互動')).toBe(true)
+  // On a wooden sign: cream letters on brown.
+  expect((await ui.find({ type: 'Text', text: 'Slim-dashboard 動畫互動' }))?.props).toMatchObject({ color: '#f5e6c8', backgroundColor: '#8b5a2b' })
+  await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'renamed' } as never)
+  expect(await shown('renamed')).toBe(true)
   await ui.unmount()
 })

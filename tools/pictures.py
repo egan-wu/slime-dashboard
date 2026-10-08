@@ -118,6 +118,15 @@ def top_rows():
     return [(hp_mp, None), (cp_bar(62, 21), None), (('scene',), None), (picker(), None)]
 
 
+SIGN_EDGE, SIGN_BOARD, SIGN_TEXT = (92, 58, 30), (139, 90, 43), (245, 230, 200)
+
+
+def session_rows():
+    name = 'Slime-dashboard tuning'
+    pad = (W - 5 - len(name)) // 2
+    return [(('frame', [[run(' ' * pad), run(name, SIGN_TEXT, True)]], SIGN_EDGE, SIGN_BOARD), None)]
+
+
 def property_rows():
     return section(
         'Property',
@@ -253,9 +262,10 @@ def render(name, rows, cells, ask=False):
         elif content[0] == 'frame':
             inner = content[1]
             color = content[2] if len(content) > 2 else DIM
+            fill = content[3] if len(content) > 3 else None
             x0, x1 = PAD + CW // 2, PAD + (W - 1) * CW - CW // 2
             d.rounded_rectangle([x0, y + CH // 2, x1, y + (len(inner) + 1) * CH + CH // 2],
-                                radius=10, outline=color, width=2)
+                                radius=10, outline=color, width=2, fill=fill)
             for i, runs in enumerate(inner):
                 draw_runs(d, runs, 2, y + (i + 1) * CH)
             y += (len(inner) + 2) * CH
@@ -281,6 +291,7 @@ for old in ('idle', 'busy'):
 render('top', top_rows(), cells['walking'])
 render('asleep', waiting_rows(), cells['asleep'])
 render('waiting', waiting_rows(), cells['waiting'], ask=True)
+render('session', session_rows(), None)
 render('property', property_rows(), None)
 render('skills', skills_rows(), None)
 render('party', party_rows(), None)

@@ -136,6 +136,15 @@ const AUTUMN: Sprite = {
   colors: { O: 0xe07a2e, o: 0xb8481f, T: 0x7a5230 },
 }
 const TREES: Sprite[] = [TREE, PINE, AUTUMN]
+// A tall oval tree in a lighter green, taller than the rest, that stands only
+// where the road starts: behind the autumn tree in the opening scene, which
+// every load begins at.
+const TALL: Sprite = {
+  rows: ['.LLL.', 'LLLLL', 'LLlLL', 'LLLLL', 'LlLLL', 'LLLLL', '.LLL.', '..T..', '..T..'],
+  colors: { L: 0x4caf50, l: 0x2e7d32, T: 0x7a5230 },
+}
+// It stands half behind the autumn tree, which overlaps its right edge.
+const LANDMARKS = [{ x: 13, sprite: TALL }]
 const ROCK: Sprite = { rows: ['.rR.', 'RRRR'], colors: { R: 0x8d8d99, r: 0xb8b8c4 } }
 const CLOUD: Sprite = { rows: ['..CCC...', 'CCCCCCCC'], colors: { C: 0xd9dce3 } }
 const BIRDS: Sprite[] = [
@@ -538,6 +547,9 @@ export function frame(
       }
     }
   }
+  // Landmarks first, so the trees scattered along the road stand in front.
+  const treeAt = Math.floor(off.tree)
+  for (const mark of LANDMARKS) draw(mark.sprite, mark.x - treeAt, GROUND_Y - 1)
   for (const sc of SCATTER) {
     const at = Math.floor(off[sc.layer])
     const width = sc.sprite.rows[0]!.length

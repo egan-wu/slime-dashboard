@@ -63,3 +63,24 @@ export function wrapSummary(text: string, width: number, maxLines = 3): string[]
   kept[maxLines - 1] = `${last.trimEnd()}…`
   return kept
 }
+
+// The session's name from `grep -o` over its transcript, one
+// `"customTitle":"…"` or `"aiTitle":"…"` a line, oldest first: the last name
+// /rename gave wins over any Claude Code made up.
+export function titleFrom(lines: string): string | undefined {
+  let custom: string | undefined
+  let made: string | undefined
+  for (const line of lines.split('\n')) {
+    const m = line.match(/^"(customTitle|aiTitle)":(".*")$/)
+    if (!m) continue
+    let value: string
+    try {
+      value = JSON.parse(m[2]!) as string
+    } catch {
+      continue
+    }
+    if (m[1] === 'customTitle') custom = value
+    else made = value
+  }
+  return custom ?? made
+}

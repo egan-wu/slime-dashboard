@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cleanSummary, wrapSummary } from './summary'
+import { cleanSummary, wrapSummary, titleFrom } from './summary'
 
 test('a summary leaves the model family out', async () => {
   expect(cleanSummary('Haiku test 1')).toBe('test 1')
@@ -24,4 +24,10 @@ test('CJK text wraps by cells, two to a character', async () => {
 
 test('a word longer than a line is split', async () => {
   expect(wrapSummary('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
+})
+
+test('the session name: the last /rename wins over any made-up name', () => {
+  expect(titleFrom('"aiTitle":"First"\n"aiTitle":"Slim-dashboard 動畫互動"\n')).toBe('Slim-dashboard 動畫互動')
+  expect(titleFrom('"customTitle":"mine"\n"aiTitle":"later"\n')).toBe('mine')
+  expect(titleFrom('')).toBeUndefined()
 })

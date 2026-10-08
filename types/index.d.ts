@@ -23,6 +23,7 @@ declare module 'claude-code' {
   interface PluginState {
     'slime-dashboard': {
       busy: boolean; model: SlimeModel; minions: SlimeMinion[]; weather: SlimeWeather; vitals: SlimeVitals
+      sessionTitle: string
       waiting: boolean
       skills: SlimeSkill[]
       skillsOpen: boolean
@@ -48,7 +49,7 @@ declare module 'claude-code' {
       unloading: boolean
       orderOpen: boolean
       width: number
-      order: Array<'stats' | 'scene' | 'models' | 'property' | 'skills' | 'monitor' | 'events'>
+      order: Array<'session' | 'stats' | 'scene' | 'models' | 'property' | 'skills' | 'monitor' | 'events'>
       behind: boolean
     }
   }
