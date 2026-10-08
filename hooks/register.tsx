@@ -1092,7 +1092,7 @@ export const register: Register = on => {
             {Input && (
               // The prompt field stands out: a bright frame with a bold title,
               // a prompt mark before the field, and how to use it while empty.
-              <Box flexDirection="column" borderStyle="round" borderColor={BAR.mp} paddingX={1}>
+              <Box flexDirection="column" borderStyle="round" borderColor={BAR.mp} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
                 <Text bold color={BAR.mp}>
                   Prompt for skill
                 </Text>
