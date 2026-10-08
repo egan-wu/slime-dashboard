@@ -61,7 +61,7 @@ test('out of MP, HP or both: which potions the slime shows', async () => {
   expect(faceOf({ plan: 'api', hp: 100, mp: 0, cp: 10 }, true).potions).toBeUndefined()
 })
 
-test('a potion ring flashes at the main slime\'s upper left', async () => {
+test('a thought bubble with the potion rises at the main slime\'s upper left', async () => {
   const pixels = (tick: number, potions: ('hp' | 'mp')[]) => {
     // A yellow Haiku slime, whose colors neither potion shares.
     const cells = frame(30, off(), tick, true, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, { eyes: 'x', down: true, potions })
@@ -71,10 +71,13 @@ test('a potion ring flashes at the main slime\'s upper left', async () => {
     for (let i = 0; i < words.length; i += 3) colors.add(words[i + 1]!).add(words[i + 2]!)
     return colors
   }
-  expect(pixels(0, ['mp']).has(POTION_COLORS.mp.p)).toBe(true)
-  expect(pixels(0, ['mp']).has(POTION_COLORS.hp.p)).toBe(false)
-  expect(pixels(0, ['mp', 'hp']).has(POTION_COLORS.hp.p)).toBe(true)
-  expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
+  // The dots rise first; the cloud with the potion follows.
+  expect(pixels(0, ['mp']).has(POTION_COLORS.mp.O)).toBe(true)
+  expect(pixels(0, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
+  expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(true)
+  expect(pixels(8, ['mp']).has(POTION_COLORS.hp.p)).toBe(false)
+  expect(pixels(8, ['mp', 'hp']).has(POTION_COLORS.hp.p)).toBe(true)
+  expect(pixels(16, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
 })
 
 test('unloading wakes a sleeping slime, which flashes green, spits colored pixels under falling arrows', async () => {

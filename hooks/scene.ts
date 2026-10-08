@@ -385,18 +385,27 @@ const BUBBLE = [
 export const bubbleCell = (columns: number) => ({ row: 2, col: homeCx(columns) })
 export const bubbleFill = (tick: number) => (Math.floor(tick / 5) % 2 === 0 ? ASK.yellow : ASK.white)
 export const ASK = { yellow: 0xffd23f, white: 0xffffff, mark: 0x101018 }
-// Out of MP or HP: a ring at the main slime's upper left holding a potion,
-// blue mana or red health, flashing on two beats and off one. With both dry
-// the MP ring stands nearest the slime and the HP ring beyond it.
-const POTION = [
-  '..OOO..',
-  '.O.k.O.',
-  'O..p..O',
-  'O.pPp.O',
-  'O.ppp.O',
-  '.O...O.',
-  '..OOO..',
+// Out of MP or HP: the slime thinks of the potion it needs, blue mana or red
+// health, in a thought bubble at its upper left. A small dot rises beside its
+// head, then a bigger one, then the cloud with the potion in it, and around
+// again (THINK ticks). With both dry the MP bubble is nearest the slime, its
+// dots leading to it, and the HP bubble beyond it.
+const THOUGHT = [
+  '.OOOOO..',
+  'OOOkOOO.',
+  'OOOpOOO.',
+  'OOpPpOO.',
+  'OOpppOO.',
+  '.OOOOO..',
 ]
+// The trail under the nearest bubble, down to the head: the big dot first.
+const TRAIL = [
+  { dx: 5, dy: 1, w: 2 },
+  { dx: 7, dy: 2, w: 1 },
+]
+const THINK = 16
+// Ticks into the cycle each part shows from: small dot, big dot, cloud.
+const THINK_FROM = { small: 0, big: 4, cloud: 8 }
 export const POTION_COLORS = {
   mp: { O: 0xe8e8f0, k: 0x9c6644, p: 0x3a86ff, P: 0x8fbcff },
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
@@ -705,11 +714,21 @@ export function frame(
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
-    if (Math.floor(tick / 4) % 3 !== 2) {
-      const ring = POTION[0]!.length
-      ;(face.potions ?? []).forEach((kind, i) =>
-        draw({ rows: POTION, colors: POTION_COLORS[kind] }, left - (ring + 1) * (i + 1), top - 2),
-      )
+    const potions = face.potions ?? []
+    if (potions.length > 0) {
+      const beat = tick % THINK
+      const wide = THOUGHT[0]!.length
+      // The nearest cloud's bottom sits a row above the head, its dots
+      // stepping down from it to beside the head.
+      const x0 = left - wide
+      const cloudBottom = top - 1
+      const white = POTION_COLORS.hp.O
+      const [big, small] = TRAIL
+      if (beat >= THINK_FROM.small) put(x0 + small!.dx, cloudBottom + small!.dy, white)
+      if (beat >= THINK_FROM.big) for (let d = 0; d < big!.w; d++) put(x0 + big!.dx + d, cloudBottom + big!.dy, white)
+      if (beat >= THINK_FROM.cloud) {
+        potions.forEach((kind, i) => draw({ rows: THOUGHT, colors: POTION_COLORS[kind] }, x0 - wide * i, cloudBottom))
+      }
     }
     // Two arrows fall beside it, over and over.
     if (unloading) {
