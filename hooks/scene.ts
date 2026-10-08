@@ -121,6 +121,17 @@ const TREE: Sprite = {
   rows: ['.GGG.', 'GGGGG', 'GGgGG', 'GgGGG', '.GGG.', '..T..', '..T..'],
   colors: { G: 0x2d9a4e, g: 0x1f6f38, T: 0x7a5230 },
 }
+// Two more kinds of tree, all as wide as the first: a dark pine in tiers and
+// a round autumn tree in orange.
+const PINE: Sprite = {
+  rows: ['..P..', '.PPP.', 'PPpPP', '.PPP.', 'PPPPp', '..T..', '..T..'],
+  colors: { P: 0x1b6b40, p: 0x124d2d, T: 0x6b4426 },
+}
+const AUTUMN: Sprite = {
+  rows: ['.OOO.', 'OOoOO', 'OOOOo', '.OoO.', '..T..', '..T..'],
+  colors: { O: 0xe07a2e, o: 0xb8481f, T: 0x7a5230 },
+}
+const TREES: Sprite[] = [TREE, PINE, AUTUMN]
 const ROCK: Sprite = { rows: ['.rR.', 'RRRR'], colors: { R: 0x8d8d99, r: 0xb8b8c4 } }
 const CLOUD: Sprite = { rows: ['..CCC...', 'CCCCCCCC'], colors: { C: 0xd9dce3 } }
 const BIRDS: Sprite[] = [
@@ -143,6 +154,10 @@ const SCATTER: Scatter[] = [
   { layer: 'rock', sprite: ROCK, span: 48, jitter: 34, skip: 3, seed: 0x60c },
 ]
 const unit = (n: number, seed: number) => (Math.imul((n ^ seed) | 0, 2654435761) >>> 0) / 2 ** 32
+
+// Which kind of tree stands at world x: picked at random, but the same spot
+// always grows the same one.
+export const treeKind = (worldX: number) => Math.floor(unit(worldX, 0x3a7) * TREES.length)
 
 // World x of every tree or rock whose left edge lies in [from, to).
 export function scattered(layer: 'tree' | 'rock', from: number, to: number): number[] {
@@ -478,7 +493,7 @@ export function frame(
     const at = Math.floor(off[sc.layer])
     const width = sc.sprite.rows[0]!.length
     for (const worldX of scattered(sc.layer, at - width + 1, at + w)) {
-      draw(sc.sprite, worldX - at, GROUND_Y - 1)
+      draw(sc.layer === 'tree' ? TREES[treeKind(worldX)]! : sc.sprite, worldX - at, GROUND_Y - 1)
       if (sc.layer === 'rock') rocks.push(worldX - at)
     }
   }

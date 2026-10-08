@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { EMERGE_TICKS, frame, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step } from './scene'
+import { EMERGE_TICKS, frame, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
 import type { Offsets } from './scene'
 import { parseWeather } from './weather'
 
@@ -150,4 +150,10 @@ test('the last little slime opens the chest with the main one, then merges into 
   expect(shows(cheering)).toBe(true) // there for the cheer
   expect(shows(merging + 3)).toBe(true) // mid-hop into the main slime
   expect(shows(merging + 12)).toBe(false) // merged: gone
+})
+
+test('trees come in three kinds, picked at random but steady per spot', async () => {
+  const kinds = scattered('tree', 0, 4000).map(treeKind)
+  expect(new Set(kinds)).toEqual(new Set([0, 1, 2]))
+  expect(scattered('tree', 0, 4000).map(treeKind)).toEqual(kinds)
 })
