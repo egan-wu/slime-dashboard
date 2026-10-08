@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Draws the README's pictures of the pane, one per section: docs/*.png.
+"""Draws the README's pictures of the pane, one per section: docs/*.png, and
+the walk at the top as docs/top.gif.
 
 The scene comes from the mod's own hooks/scene.ts (run with Node's type
 stripping); the rows of text around it are laid out as hooks/register.tsx
@@ -21,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(ROOT, 'hooks')
 DOCS = os.path.join(ROOT, 'docs')
 W = 33  # the pane's columns
+GIF_FRAMES = 80  # top.gif: eight seconds of the walk
 CW, CH, PAD = 18, 36, 24  # a cell's pixels, and the margin
 MARGIN = 3  # columns right of the pane for badges
 FONT = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 29)
@@ -49,17 +51,24 @@ def scenes():
                 f.write(text)
         with open(os.path.join(tmp, 'cells.ts'), 'w') as f:
             f.write("""
-import { frame, ROWS } from './scene.ts'
+import { frame, ROWS, step } from './scene.ts'
 const W = %d
 const decode = (b64: string) => { const b = Buffer.from(b64, 'base64'); const u = new Uint32Array(b.buffer, b.byteOffset, b.length / 4); return Array.from({ length: ROWS }, (_, r) => Array.from(u.slice(r * W * 3, (r + 1) * W * 3))) }
 const off = (n: number) => ({ cloud: 23 + n, bird: 40, tree: 52 + n, rock: 31 + n, ground: 9 })
 const troop = [{ model: 'claude-haiku-5-5', pos: 0 }, { model: 'claude-sonnet-5-5', pos: 1 }]
+// The walk, frame by frame, as the pane plays it at ten frames a second.
+const walk = off(28)
+const walkingFrames = Array.from({ length: %d }, (_, t) => {
+  const cells = decode(frame(W, walk, 12 + t, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }))
+  step(walk, true)
+  return cells
+})
 console.log(JSON.stringify({
-  walking: decode(frame(W, off(28), 12, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' })),
+  walkingFrames,
   asleep: decode(frame(W, off(0), 7, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' })),
   waiting: decode(frame(W, off(5), 0, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }, undefined, { ask: true })),
 }))
-""" % W)
+""" % (W, GIF_FRAMES))
         out = subprocess.run(['node', '--experimental-strip-types', '--no-warnings', 'cells.ts'],
                              cwd=tmp, capture_output=True, text=True, check=True)
         return json.loads(out.stdout)
@@ -251,6 +260,21 @@ def draw_scene(d, cells, y, ask=False):
 
 
 def render(name, rows, cells, ask=False):
+    img = draw(rows, cells, ask)
+    path = os.path.join(DOCS, f'{name}.png')
+    img.save(path)
+    print(path, img.size)
+
+
+def render_gif(name, rows, frames):
+    """An animated picture: the rows drawn over each frame of the scene, 10 fps, looping."""
+    imgs = [draw(rows, cells).quantize(colors=128, method=0) for cells in frames]
+    path = os.path.join(DOCS, f'{name}.gif')
+    imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=100, loop=0, optimize=True, disposal=1)
+    print(path, imgs[0].size, f'{len(imgs)} frames', f'{os.path.getsize(path) // 1024} KB')
+
+
+def draw(rows, cells, ask=False):
     margin = MARGIN if any(badge is not None for _, badge in rows) else 0
     img = Image.new('RGB', ((W + margin) * CW + 2 * PAD, height(rows) * CH + 2 * PAD), BG)
     d = ImageDraw.Draw(img)
@@ -276,9 +300,7 @@ def render(name, rows, cells, ask=False):
             y += CH
         if badge is not None:
             draw_badge(d, badge, top if content[0] != 'frame' else top + CH)
-    path = os.path.join(DOCS, f'{name}.png')
-    img.save(path)
-    print(path, img.size)
+    return img
 
 
 with open(os.path.join(HOOKS, 'version.ts')) as f:
@@ -287,10 +309,10 @@ with open(os.path.join(HOOKS, 'version.ts')) as f:
 if not shutil.which('node'):
     sys.exit('needs node 22+ on PATH')
 cells = scenes()
-for old in ('idle', 'busy'):
+for old in ('idle', 'busy', 'top'):
     if os.path.exists(os.path.join(DOCS, f'{old}.png')):
         os.remove(os.path.join(DOCS, f'{old}.png'))
-render('top', top_rows(), cells['walking'])
+render_gif('top', top_rows(), cells['walkingFrames'])
 render('asleep', waiting_rows(), cells['asleep'])
 render('waiting', waiting_rows(), cells['waiting'], ask=True)
 render('session', session_rows(), None)

@@ -14,7 +14,7 @@ The sign is also a button. Pressed, it opens a field under it; type a new name, 
 
 ## HP / MP / CP, the slime and the model buttons
 
-<img src="docs/top.png" width="340" alt="HP 23%, MP 70%, CP 62%; the red Opus slime walks past a rock and an orange tree, a yellow and a blue little slime behind it; the model buttons below">
+<img src="docs/top.gif" width="340" alt="HP 23%, MP 70%, CP 62%; the red Opus slime crawls along as trees, rocks and goo roll by, a yellow and a blue little slime hopping behind it; the model buttons below">
 
 - **HP / MP / CP**: on a Pro or Max subscription HP is what is left of the seven-day limit and MP of the five-hour one; on an API key or enterprise seat HP stays full. CP (capacity) is how full the context window is, shading from light to dark grey.
 - **The slime** travels while Claude works, past clouds, birds, trees (round green, pine or autumn orange, at random) and rocks at their own speeds; every load opens on the same stretch of road, where a tall oval tree stands half behind an autumn one. Along the road lie 2x2 blobs of goo in every color: it stretches taller with its white mouth wide open as it reaches each one and eats it, its context filling up. Its color follows the model: Fable purple, Opus red, Sonnet blue, Haiku yellow, unless Setting's `[Color]` picked others.
