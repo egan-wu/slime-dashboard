@@ -100,6 +100,8 @@ const SLIME = {
   // Jaw dropped wide over a blob of goo just ahead, stretching it taller:
   // K the open mouth, R the tongue.
   gape: ['.BHMB.', 'DEMMED', 'DKKKKD', 'DKKKKD', 'DKRRKD', 'DBBBBD'],
+  // Unloading, it opens a round mouth to spit each spray out of it.
+  spit: ['.BHMB.', 'DEMMED', 'DBKKBD', 'DKKKKD', 'DBKKBD', 'DBBBBD'],
 }
 const MOUTH = { K: 0xffffff, R: 0xff7a9c }
 // A subagent's little slime, trailing the main one: a 2x2 ball in the air
@@ -484,13 +486,15 @@ const quarterTurn = (rows: string[]) => [...rows[0]!].map((_, x) => rows.map(r =
 const halfTurn = (rows: string[]) => rows.map(r => [...r].reverse().join('')).reverse()
 export const RESPAWN_COLORS = { white: 0xfffbe8, gold: 0xffd23f }
 // Unloading (the context compacting): the slime sets its load down. Every
-// few ticks its body flashes white and it spits a spray of the goo it ate out
-// of its back, which arc off to the left, land and vanish; green arrows fall
+// few ticks its body flashes white, its mouth opens and it spits a spray of
+// the goo it ate, which arc off to the left, land and vanish; green arrows fall
 // beside it, until the compaction ends.
 export const UNLOAD_COLORS = {
   glow: { B: 0xffffff, H: 0xffffff, M: 0xe8e8e8, D: 0xb8b8b8 },
   pixels: GOO_COLORS,
   arrow: 0x38b000,
+  // The spitting mouth, dark so it shows on the white flash.
+  mouth: 0x3a0d1e,
 } as const
 // Ticks between sprays, sprays in the air at once, and ticks each one flies.
 const SPIT_EVERY = 4
@@ -822,7 +826,7 @@ export function frame(
     const lift = travelling ? rockLift(left, width, rocks) : 0
     const unloading = face.unloading === true
     const gaping = travelling && lift === 0 && nextGoo <= GAPE_REACH
-    const rows = gaping
+    let rows = gaping
       ? SLIME.gape
       : !travelling
       ? SLIME.awake
@@ -832,9 +836,16 @@ export function frame(
           ? SLIME.awake
           : SLIME.crawl
     const bottom = GROUND_Y - 1 - lift
+    // It flashes white and opens its mouth as each spray leaves it.
+    const spitting = unloading && tick % SPIT_EVERY < 2
+    if (spitting) rows = SLIME.spit
+    const body = { ...(spitting ? { ...tint, ...UNLOAD_COLORS.glow } : tint), ...MOUTH, ...(spitting ? { K: UNLOAD_COLORS.mouth } : {}) }
     if (unloading) {
-      // Drawn under the slime, so each pixel comes out of its body; a spray
-      // keeps its colors all the way down.
+      // Drawn under the slime, so each pixel comes out of its open mouth (its
+      // middle, a row above the chin); a spray keeps its colors all the way
+      // down.
+      const mouthX = left + (width >> 1) - (GOO_W >> 1)
+      const mouthY = bottom - 1
       const cycle = SPIT_EVERY * SPIT_SPRAYS
       for (let j = 0; j < SPIT_SPRAYS; j++) {
         const age = (tick + j * SPIT_EVERY) % cycle
@@ -845,14 +856,11 @@ export function frame(
           if (!kept(p, PERF[perf].fx)) return
           const n = UNLOAD_COLORS.pixels.length
           const color = UNLOAD_COLORS.pixels[(((spray * SPRAY.length + p) % n) + n) % n]!
-          const x = Math.round(left + 1 - far * k)
-          draw({ rows: GOO, colors: { G: color } }, x, bottom - 1 - Math.round(Math.sin(k * Math.PI) * high))
+          const x = Math.round(mouthX - far * k)
+          draw({ rows: GOO, colors: { G: color } }, x, mouthY - Math.round(Math.sin(k * Math.PI) * high))
         })
       }
     }
-    // It flashes white as each spray leaves it.
-    const glowing = unloading && tick % SPIT_EVERY < 2
-    const body = { ...(glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint), ...MOUTH }
     draw({ rows, colors: body }, left, bottom)
     // The face goes over the eyes as characters, as the sleeping eyes do: a
     // cell holds the eye pixel and the body pixel beside it, so the

@@ -80,7 +80,7 @@ test('a thought bubble with the potion rises at the main slime\'s upper left', a
   expect(pixels(16, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
 })
 
-test('unloading wakes a sleeping slime, which flashes green, spits colored pixels under falling arrows', async () => {
+test('unloading wakes a sleeping slime, which flashes, opens its mouth and spits colored pixels under falling arrows', async () => {
   const look = (tick: number, face: { unloading?: boolean }) => {
     const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, face)
     const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
@@ -102,6 +102,9 @@ test('unloading wakes a sleeping slime, which flashes green, spits colored pixel
   // Green as each spray leaves, every four ticks.
   expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(false)
   expect(look(4, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(true)
+  // Its mouth opens only as it spits.
+  expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.mouth)).toBe(false)
+  expect(look(4, { unloading: true }).colors.has(UNLOAD_COLORS.mouth)).toBe(true)
 })
 
 test('slime colors: each family wears the palette picked for it, shared or not', async () => {
