@@ -367,19 +367,22 @@ export const POTION_COLORS = {
   mp: { O: 0xe8e8f0, k: 0x9c6644, p: 0x3a86ff, P: 0x8fbcff },
   hp: { O: 0xe8e8f0, k: 0x9c6644, p: 0xe5383b, P: 0xff8a8c },
 } as const
-// Unloading (the context compacting): a ring at the same place holding a
-// sack with a green arrow pointing down, a load being set down. It flashes
-// as the potions do, until the compaction ends.
-const UNLOAD = [
-  '..OOO..',
-  '.O.k.O.',
-  'O.bgb.O',
-  'O.bgb.O',
-  'O.ggg.O',
-  '.O.g.O.',
-  '..OOO..',
-]
-export const UNLOAD_COLORS = { O: 0xe8e8f0, k: 0x9c6644, b: 0xc89f6a, g: 0x38b000 } as const
+// Unloading (the context compacting): the slime sets its load down. Every
+// few ticks it squashes and spits a crate out of its back, which arcs off to
+// the left, lands and sinks away; its body flashes green, and green arrows
+// fall beside it, until the compaction ends.
+export const UNLOAD_COLORS = {
+  glow: { B: 0x7ae582, H: 0xd8f8dc, M: 0xa8eeb0, D: 0x38b000 },
+  crate: { C: 0xc89f6a, c: 0x9c6644 },
+  arrow: 0x38b000,
+} as const
+// Ticks between crates, crates in the air at once, and ticks each one flies.
+const SPIT_EVERY = 4
+const SPIT_CRATES = 3
+const SPIT_FLIGHT = 9
+const CRATE = { air: ['CC', 'Cc'], down: ['cc'] }
+// Squashed flat as it spits.
+const SQUASH = ['DEMMED', 'DBBBBD']
 const ZZZ = [
   { dx: 2, ch: 'z' },
   { dx: 3, ch: 'Z' },
@@ -605,7 +608,10 @@ export function frame(
     const left = cx - (width >> 1)
     // Standing still, nothing passes beneath it: it stays on the ground.
     const lift = travelling ? rockLift(left, width, rocks) : 0
-    const rows = !travelling
+    const unloading = face.unloading === true
+    const rows = unloading && !travelling && tick % SPIT_EVERY === 0
+      ? SQUASH
+      : !travelling
       ? SLIME.awake
       : lift > 0
         ? SLIME.air
@@ -613,7 +619,19 @@ export function frame(
           ? SLIME.awake
           : SLIME.crawl
     const bottom = GROUND_Y - 1 - lift
-    draw({ rows, colors: tint }, left, bottom)
+    if (unloading) {
+      // Drawn under the slime, so each crate comes out of its body.
+      for (let j = 0; j < SPIT_CRATES; j++) {
+        const age = (tick + j * SPIT_EVERY) % (SPIT_EVERY * SPIT_CRATES)
+        const k = Math.min(age, SPIT_FLIGHT) / SPIT_FLIGHT
+        const x = Math.round(left + 1 - 8 * k)
+        const rows = age > SPIT_FLIGHT ? CRATE.down : CRATE.air
+        draw({ rows, colors: UNLOAD_COLORS.crate }, x, GROUND_Y - 1 - Math.round(Math.sin(k * Math.PI) * 4))
+      }
+    }
+    const glowing = unloading && Math.floor(tick / 3) % 2 === 1
+    const body = glowing ? { ...tint, ...UNLOAD_COLORS.glow } : tint
+    draw({ rows, colors: body }, left, bottom)
     // The face goes over the eyes as characters, as the sleeping eyes do: a
     // cell holds the eye pixel and the body pixel beside it, so the
     // character sits on the body's color.
@@ -624,17 +642,21 @@ export function frame(
       const [l, r] = FACE_EYES[face.eyes]
       const cols = [...eyeRow].flatMap((ch, dx) => (ch === 'E' ? [dx] : []))
       cols.forEach((dx, i) =>
-        overlays.push({ col: left + dx, row: eyeY >> 1, ch: i === 0 ? l : r, fg: 0x101018, bg: info.body }),
+        overlays.push({ col: left + dx, row: eyeY >> 1, ch: i === 0 ? l : r, fg: 0x101018, bg: body.B }),
       )
     }
     if (face.vein) overlays.push({ col: left - 1, row: top >> 1, ch: '#', fg: VEIN })
     if (Math.floor(tick / 4) % 3 !== 2) {
-      const width = POTION[0]!.length
-      const rings = [
-        ...(face.potions ?? []).map(kind => ({ rows: POTION, colors: POTION_COLORS[kind] })),
-        ...(face.unloading ? [{ rows: UNLOAD, colors: UNLOAD_COLORS }] : []),
-      ]
-      rings.forEach((ring, i) => draw(ring, left - (width + 1) * (i + 1), top - 2))
+      const ring = POTION[0]!.length
+      ;(face.potions ?? []).forEach((kind, i) =>
+        draw({ rows: POTION, colors: POTION_COLORS[kind] }, left - (ring + 1) * (i + 1), top - 2),
+      )
+    }
+    // Two arrows fall beside it, over and over.
+    if (unloading) {
+      for (const k of [0, 2]) {
+        overlays.push({ col: left + width, row: 1 + ((Math.floor(tick / 2) + k) % 4), ch: '↓', fg: UNLOAD_COLORS.arrow })
+      }
     }
     // The bubble's tail rests on the head.
     if (face.ask) draw({ rows: BUBBLE, colors: { B: bubbleFill(tick) } }, cx - (BUBBLE[0]!.length >> 1), top - 1)

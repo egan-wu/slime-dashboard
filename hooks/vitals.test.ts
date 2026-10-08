@@ -76,7 +76,7 @@ test('a potion ring flashes at the main slime\'s upper left', async () => {
   expect(pixels(8, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
 })
 
-test('unloading wakes a sleeping slime under a flashing ring with a sack', async () => {
+test('unloading wakes a sleeping slime, which spits crates and flashes green under falling arrows', async () => {
   const look = (tick: number, face: { unloading?: boolean }) => {
     const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, face)
     const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
@@ -86,13 +86,17 @@ test('unloading wakes a sleeping slime under a flashing ring with a sack', async
       chars.add(words[i]!)
       colors.add(words[i + 1]!).add(words[i + 2]!)
     }
-    return { colors, asleep: chars.has('z'.codePointAt(0)!) }
+    return { colors, asleep: chars.has('z'.codePointAt(0)!), arrows: chars.has('↓'.codePointAt(0)!) }
   }
   expect(look(0, {}).asleep).toBe(true)
-  expect(look(0, {}).colors.has(UNLOAD_COLORS.g)).toBe(false)
-  expect(look(0, { unloading: true }).asleep).toBe(false)
-  expect(look(0, { unloading: true }).colors.has(UNLOAD_COLORS.g)).toBe(true)
-  expect(look(8, { unloading: true }).colors.has(UNLOAD_COLORS.g)).toBe(false)
+  expect(look(0, {}).colors.has(UNLOAD_COLORS.crate.C)).toBe(false)
+  expect(look(0, {}).arrows).toBe(false)
+  expect(look(2, { unloading: true }).asleep).toBe(false)
+  expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.crate.C)).toBe(true)
+  expect(look(2, { unloading: true }).arrows).toBe(true)
+  // Green on every other three ticks.
+  expect(look(2, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(false)
+  expect(look(3, { unloading: true }).colors.has(UNLOAD_COLORS.glow.B)).toBe(true)
 })
 
 test('slime colors: each family wears the palette picked for it, shared or not', async () => {
