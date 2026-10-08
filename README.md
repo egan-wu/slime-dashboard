@@ -95,7 +95,7 @@ The plugin's version shows at the pane's foot.
 
 ## Getting around
 
-Each section below can be hidden or moved with Setting's `[Display]` and `[Order]`. Every button also works from the keyboard: ctrl+x tab, or a click, gives the pane the keys, then Tab walks the buttons and Enter presses one. Each section's title button (`[ ▼ ]` while open, `[ ▲ ]` while closed) opens or closes it; closed, Party and Event Message count what they hold in their titles.
+Each section above can be hidden or moved with Setting's `[Display]` and `[Order]`. Every button also works from the keyboard: ctrl+x tab, or a click, gives the pane the keys, then Tab walks the buttons and Enter presses one. Each section's title button (`[ ▼ ]` while open, `[ ▲ ]` while closed) opens or closes it; closed, Party and Event Message count what they hold in their titles.
 
 ## Usage
 
