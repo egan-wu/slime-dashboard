@@ -9,6 +9,7 @@ export const SECTIONS = [
   { id: 'models', label: 'Model buttons' },
   { id: 'property', label: 'Property' },
   { id: 'skills', label: 'Skill Box' },
+  { id: 'tree', label: 'Skill Tree' },
   { id: 'monitor', label: 'Party' },
   { id: 'events', label: 'Event Message' },
 ] as const

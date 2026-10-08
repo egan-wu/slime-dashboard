@@ -117,7 +117,7 @@ test('General holds Unload, which runs /compact; the CP bar is no button', async
     // A category closes to its title and count, and opens again.
     await ui.press({ key: 'skillcat-General' })
     expect(await ui.find({ key: 'skill-Unload' })).toBeUndefined()
-    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▲ General (2)')
+    expect((await ui.find({ key: 'skillcat-General' }))?.text).toBe('▸ General (2)')
     await ui.press({ key: 'skillcat-General' })
     await ui.press({ key: 'skills-toggle' })
     await ui.unmount()
@@ -449,7 +449,7 @@ test('Setting: Color cycles a family through six colors; Default puts them back'
 test('Order: a kept order is cleaned up, and a move swaps neighbors', () => {
   expect(orderFrom(undefined)).toEqual(DEFAULT_ORDER)
   // Unknown and repeated ids dropped; the missing ones back at the end.
-  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['session', 'events', 'scene', 'models', 'property', 'skills', 'monitor', 'stats'])
+  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['session', 'events', 'scene', 'models', 'property', 'skills', 'tree', 'monitor', 'stats'])
   // A section added since the order was kept goes in at its default place.
   expect(orderFrom(DEFAULT_ORDER.filter(id => id !== 'session'))).toEqual(DEFAULT_ORDER)
   expect(moveSection(DEFAULT_ORDER, 'scene', -1).slice(1, 3)).toEqual(['scene', 'stats'])
@@ -466,6 +466,8 @@ test('Setting: Order moves sections up and down; Default puts them back', async 
   expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
   await ui.press({ key: 'order' })
   expect(await titles()).toEqual(['Property ', 'Skill Box ', 'Party ', 'Event Message '])
+  // Past Party, Skill Tree and Skill Box.
+  await ui.press({ key: 'order-up-events' })
   await ui.press({ key: 'order-up-events' })
   await ui.press({ key: 'order-up-events' })
   expect(await titles()).toEqual(['Property ', 'Event Message ', 'Skill Box ', 'Party '])
@@ -578,6 +580,47 @@ test('the sign renames the session: press, type, press again; empty, unchanged o
   await ui.unmount()
 })
 
+test('the sign\'s [≡] lists recent sessions, newest first, and resumes the one pressed', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { HOME: '/home/me' })
+  on('session.cwd', async () => ({ value: '/work/app' }))
+  on('session.id', async () => ({ value: 'ccc' }))
+  const listed: string[] = []
+  const file = (name: string, mtimeMs: number) => ({ name, kind: 'file' as const, size: 10, mtimeMs, isLink: false })
+  on('fs.list', async (_$, e) => (listed.push(e.path), {
+    value: [file('aaa.jsonl', 1_000), file('bbb.jsonl', 3_000), file('ccc.jsonl', 2_000), file('empty.jsonl', 4_000), file('notes.txt', 5_000)],
+  }))
+  const grepped: Record<string, string> = {
+    aaa: '"type":"user"\n"aiTitle":"Fix the build"\n"customTitle":"Release day"\n',
+    bbb: '"type":"user"\n"aiTitle":"Weather block"\n',
+    ccc: '"type":"user"\n',
+    empty: '"aiTitle":"Never typed into"\n',
+  }
+  on('process.run', async (_$, e) => {
+    const id = e.argv.at(-1)!.split('/').pop()!.replace('.jsonl', '')
+    return { value: { exitCode: 0, stdout: grepped[id] ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const resumed: string[] = []
+  on('command.run', { command: 'resume' }, async (_$, e) => {
+    resumed.push(e.args)
+    return { text: '' }
+  })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'sessions' }))?.text).toBe('[≡]')
+  await ui.press({ key: 'sessions' })
+  expect(listed).toEqual(['/home/me/.claude/projects/-work-app'])
+  // Newest first; this session and one never typed into are left out; a
+  // /rename's name wins over a made-up one.
+  const rows = (await ui.findAll({ type: 'Button' })).filter(b => b.key?.startsWith('session-')).map(b => b.text)
+  expect(rows).toEqual(['Weather block', 'Release day'])
+  expect(rows).not.toContain('Never typed into')
+  await ui.press({ key: 'session-bbb' })
+  expect(resumed).toEqual(['bbb'])
+  expect(await ui.find({ key: 'session-bbb' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('Respawn asks first: [N]/[Y]; [Y] runs /clear, [N] backs out', async ($, on) => {
   mock.store(on)
   mock.clock(on)
@@ -626,5 +669,30 @@ test('Setting: Performance picks High, Mid or Low, the current one bright', asyn
   await ui.press({ key: 'perf-high' })
   await ui.press({ key: 'perf' })
   expect(await dim('perf-high')).toBe(false)
+  await ui.unmount()
+})
+
+test('Skill Box: categories move with [▼][▲], a skill trades places with the next with its [▼]', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await manage('add lint --category Code')
+  await manage('add build --category Code')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  const cats = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^skillcat-(General|Code)$/.test(k))
+  expect(await cats()).toEqual(['skillcat-General', 'skillcat-Code'])
+  await ui.press({ key: 'skillcat-down-General' })
+  expect(await cats()).toEqual(['skillcat-Code', 'skillcat-General'])
+  await ui.press({ key: 'skillcat-down-General' })
+  expect(await cats()).toEqual(['skillcat-Code', 'skillcat-General'])
+  await ui.press({ key: 'skillcat-up-General' })
+  expect(await cats()).toEqual(['skillcat-General', 'skillcat-Code'])
+  const skills = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^skill-(lint|build|Unload|Respawn)$/.test(k))
+  expect(await skills()).toEqual(['skill-Unload', 'skill-Respawn', 'skill-lint', 'skill-build'])
+  await ui.press({ key: 'skill-down-General-Unload' })
+  await ui.press({ key: 'skill-down-Code-lint' })
+  expect(await skills()).toEqual(['skill-Respawn', 'skill-Unload', 'skill-build', 'skill-lint'])
   await ui.unmount()
 })

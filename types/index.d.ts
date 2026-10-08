@@ -1,5 +1,9 @@
 export type SlimeModel = string
 // A Skill Box skill (hooks/skills.ts): its command, category and dim description.
+// A Party Combo (hooks/combos.ts): layers of skills, each step's model and
+// subagent type, and a condition the leader judges after a layer.
+export type SlimeComboStep = { skill: string; model: 'haiku' | 'sonnet' | 'opus' | 'fable'; agent: string }
+export type SlimeCombo = { name: string; layers: { steps: SlimeComboStep[]; condition?: string }[] }
 export type SlimeSkill = { name: string; category: string; description?: string; command?: string }
 // One line of the Event Message block (hooks/events.ts): when, and what happened.
 export type SlimeEventEntry = { at: number; text: string }
@@ -10,6 +14,8 @@ export type SlimeVitals = { plan: 'subscription' | 'api'; hp: number; mp: number
 // `done` once its subagent has handed back; its slime is then dropping out of line.
 // `description` is the few words the Agent call gave its task.
 export type SlimeMinion = { id: string; model: string; description?: string; done?: boolean }
+// A recent session the sign's [≡] lists (hooks/summary.ts): its id, name and last write.
+export type SlimeRecentSession = { id: string; title: string; at: number }
 export type SlimeWeather = {
   day: boolean
   sky: 'clear' | 'partly' | 'cloudy' | 'rain' | 'snow'
@@ -26,6 +32,8 @@ declare module 'claude-code' {
       sessionTitle: string
       renameOpen: boolean
       renameDraft: string
+      sessionsOpen: boolean
+      recentSessions: SlimeRecentSession[]
       respawnConfirm: boolean
       performance: 'high' | 'mid' | 'low'
       perfOpen: boolean
@@ -35,6 +43,20 @@ declare module 'claude-code' {
       skillPrompt: string
       skillTops: Record<string, number>
       skillCatsClosed: string[]
+      skillOrder: Record<string, string[]>
+      catOrder: string[]
+      combos: SlimeCombo[]
+      treeOpen: boolean
+      comboSel: string
+      comboPick: number
+      comboCond: number
+      comboFold: boolean
+      comboRename: boolean
+      comboName: string
+      comboEdits: Record<string, SlimeCombo>
+      comboFresh: string[]
+      comboDelete: boolean
+      agents: string[]
       propsOpen: boolean
       tally: SlimeTally
       iteration: number
@@ -54,7 +76,7 @@ declare module 'claude-code' {
       unloading: boolean
       orderOpen: boolean
       width: number
-      order: Array<'session' | 'stats' | 'scene' | 'models' | 'property' | 'skills' | 'monitor' | 'events'>
+      order: Array<'session' | 'stats' | 'scene' | 'models' | 'property' | 'skills' | 'tree' | 'monitor' | 'events'>
       behind: boolean
     }
   }

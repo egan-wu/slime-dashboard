@@ -84,3 +84,29 @@ export function titleFrom(lines: string): string | undefined {
   }
   return custom ?? made
 }
+
+// The sign's [≡] list: the project's other sessions, newest first, that the
+// person has typed into (a `"type":"user"` line among what grep found), each
+// by the name titleFrom reads, else when it was last written.
+export type RecentSession = { id: string; title: string; at: number }
+export function recentFrom(
+  found: readonly { id: string; at: number; lines: string }[],
+  current: string,
+  max: number,
+  untitled: (at: number) => string,
+): RecentSession[] {
+  return found
+    .filter(f => f.id !== current && f.lines.includes('"type":"user"'))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, max)
+    .map(f => ({ id: f.id, title: titleFrom(f.lines) ?? untitled(f.at), at: f.at }))
+}
+
+// How long ago, as a list row says it: `now`, `5m`, `3h`, `2d`.
+export function agoText(at: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - at) / 1000))
+  if (s < 60) return 'now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
