@@ -278,6 +278,7 @@ test('the Event Message block shows the newest three, each framed, stamp then su
   await run('effort', 'max')
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'events-toggle' })
   const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '')
   const from = texts.indexOf('Event Message ')
   expect(from).toBeGreaterThan(-1)
@@ -298,17 +299,18 @@ test('Sub-agent Monitor and Event Message open and close, closed titles counting
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const shown = async (text: string) => (await ui.findAll({ type: 'Text' })).some(t => t.text === text)
-    expect(await shown(' - none')).toBe(true)
-    expect(await shown('Effort: High')).toBe(true)
-    await ui.press({ key: 'monitor-toggle' })
-    await ui.press({ key: 'events-toggle' })
+    // Both start closed, their titles counting what they hold.
     expect(await shown('Sub-agent Monitor (0) ')).toBe(true)
     expect(await shown('Event Message (1) ')).toBe(true)
     expect(await shown(' - none')).toBe(false)
     expect(await shown('Effort: High')).toBe(false)
     await ui.press({ key: 'monitor-toggle' })
     await ui.press({ key: 'events-toggle' })
+    expect(await shown(' - none')).toBe(true)
     expect(await shown('Effort: High')).toBe(true)
+    await ui.press({ key: 'monitor-toggle' })
+    await ui.press({ key: 'events-toggle' })
+    expect(await shown('Effort: High')).toBe(false)
     await ui.unmount()
   }
 })
@@ -353,6 +355,7 @@ test('Setting: Update refreshes the marketplace, updates the plugin, reloads; a 
   expect((await ui.find({ key: 'update' }))?.text).toBe('[Update]')
   expect(await ui.find({ type: 'Text', text: ': update dashboard' })).toBeDefined()
 
+  await ui.press({ key: 'events-toggle' })
   await ui.press({ key: 'update' })
   expect(ran).toEqual([
     'claude plugin marketplace update slime-dashboard',
@@ -456,7 +459,7 @@ test('Setting: Order moves sections up and down; Default puts them back', async 
   mock.store(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const titles = async () =>
-    (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').filter(t => ['Property ', 'Skill Box ', 'Sub-agent Monitor ', 'Event Message '].includes(t))
+    (await ui.findAll({ type: 'Text' })).map(t => (t.text ?? '').replace(/ \(\d+\) $/, ' ')).filter(t => ['Property ', 'Skill Box ', 'Sub-agent Monitor ', 'Event Message '].includes(t))
   await ui.press({ key: 'settings-toggle' })
   expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
   await ui.press({ key: 'order' })

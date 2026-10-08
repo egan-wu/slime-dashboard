@@ -87,9 +87,9 @@ const iterationAtom = atom({ plugin: 'slime-dashboard', key: 'iteration' } as co
 const effortAtom = atom({ plugin: 'slime-dashboard', key: 'effort' } as const, '')
 // The Event Message block's events, newest first.
 const eventsAtom = atom({ plugin: 'slime-dashboard', key: 'events' } as const, [] as SlimeEvent[])
-// Whether Sub-agent Monitor and Event Message are open; both start open.
-const monitorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'monitorOpen' } as const, true)
-const eventsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'eventsOpen' } as const, true)
+// Whether Sub-agent Monitor and Event Message are open; like every block, both start closed.
+const monitorOpenAtom = atom({ plugin: 'slime-dashboard', key: 'monitorOpen' } as const, false)
+const eventsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'eventsOpen' } as const, false)
 // Whether the row of effort levels under Property's Effort is open.
 const modelOpenAtom = atom({ plugin: 'slime-dashboard', key: 'modelOpen' } as const, false)
 const effortOpenAtom = atom({ plugin: 'slime-dashboard', key: 'effortOpen' } as const, false)
