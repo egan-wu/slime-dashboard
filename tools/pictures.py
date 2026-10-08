@@ -78,11 +78,13 @@ console.log(JSON.stringify({
         return json.loads(out.stdout)
 
 
-# A row is a list of runs (text, color, bold), or ('scene',), or ('frame', rows)
-# for a rounded frame around some rows; a run's text may carry a badge as
-# ('badge', n) placed after the row.
-def run(text, color=FG, bold=False):
-    return (text, color, bold)
+# A row is a list of runs (text, color, bold, background), or ('scene',), or
+# ('frame', rows, edge, fill) for a rounded frame around some rows (frames
+# nest), or ('split', left runs, right runs) for a row with buttons at its
+# right edge, or ('indent', columns, rows[, right columns]); a top-level row may carry a badge
+# as ('badge', n) placed after the row.
+def run(text, color=FG, bold=False, bg=None):
+    return (text, color, bold, bg)
 
 
 def bar(label, pct, cells, color):
@@ -135,9 +137,16 @@ SIGN_EDGE, SIGN_BOARD, SIGN_TEXT = (92, 58, 30), (139, 90, 43), (245, 230, 200)
 
 
 def session_rows():
-    name = 'Slime-dashboard tuning'
-    pad = (W - 5 - len(name)) // 2
-    return [(('frame', [[run(' ' * pad), run(name, SIGN_TEXT, True)]], SIGN_EDGE, SIGN_BOARD), None)]
+    # [≡] at the sign's left, the name centered with as much again on the right;
+    # pressed, the project's recent sessions open under it.
+    name = 'Dashboard tuning'
+    room = W - 5 - 3 - 3
+    pad = (room - len(name)) // 2
+    sign = ('frame', [[run('[≡]', SIGN_TEXT, True), run(' ' * pad), run(name, SIGN_TEXT, True)]], SIGN_EDGE, SIGN_BOARD)
+    recent = ('frame', [('split', [run('Release day')], [run('2h', DIM)]),
+                        ('split', [run('Weather block')], [run('1d', DIM)]),
+                        ('split', [run('Fix the build')], [run('3d', DIM)])], SIGN_EDGE)
+    return [(sign, None), (recent, None)]
 
 
 def property_rows():
@@ -157,11 +166,49 @@ def skills_rows():
     return section(
         'Skill Box',
         ('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP),
-        [run('▼ General')],
-        ('frame', [[run('[Unload]'), run(': compact context window', DIM)],
-                   [run('[Respawn]'), run(': create new session', DIM)],
-                   [run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
-        [run('▲ Code (1)')],
+        ('frame', [('split', [run('▼ General')], MOVE),
+                   [run('[▼]'), run('[Unload]'), run(': compact context window', DIM)],
+                   [run('[▼]'), run('[Respawn]'), run(': create new session', DIM)],
+                   [run('[▼]', DIM), run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
+        ('indent', 2, [('split', [run('▸ Code (1)')], MOVE)], 2),
+        ('frame', [('split', [run('▼ Party Combo')], MOVE),
+                   [run('[▼]'), run('[Run-Test]'), run(': 3 waves · 4 skills', DIM)],
+                   [run('[▼]', DIM), run('[Nightly]'), run(': 2 waves · 3 skills', DIM)]]),
+    )
+
+
+MOVE = [run('[▼][▲]')]
+PURPLE = (90, 24, 154)
+
+
+def step(skill, model, agent):
+    """A skill in a wave, as a 33-column pane lays it out: two rows."""
+    return [('split', [run('■ ', rgb(MODEL[model])), run(f'/{skill}')], [run('✕', DIM)]),
+            [run('  '), run(f'{model:<6}', DIM), run(' '), run(agent, DIM)]]
+
+
+def wave(n, *steps, last=False):
+    head = ('split', [run(f'Wave {n}', FG, True)], [run('▲ ▼ ✕', DIM)])
+    return ('frame', [head] + [r for st in steps for r in st] + [[run('+ skill', DIM)]])
+
+
+def tree_rows():
+    gap = lambda *cond: ('indent', 3, [[run(f'◆ {cond[0]}', DIM)]] + [[run(f'  {c}', DIM)] for c in cond[1:]] + [[run('↓', DIM)]])
+    combo = ('frame', [
+        [run(' ▾ Run-Test ', (255, 255, 255), True, PURPLE), run(' [Rename]')],
+        wave(1, step('demo-build', 'Haiku', 'general')),
+        gap('+ condition'),
+        wave(2, step('demo-test', 'Sonnet', 'general')),
+        gap('if Fail, run the debug', 'wave; if Pass, go on'),
+        wave(3, step('demo-check', 'Opus', 'explore'), step('demo-archive', 'Haiku', 'general')),
+        ('indent', 3, [[run('◆ + condition', DIM)]]),
+        [run('+ Wave', DIM)],
+        [run('[Save] [Delete]')],
+    ], PURPLE)
+    return section(
+        'Skill Tree',
+        [run(' '), run('[Run-Test]'), run('[Nightly*]', DIM), run('[+New]')],
+        combo,
     )
 
 
@@ -205,34 +252,79 @@ def waiting_rows():
     return [(('scene',), None)]
 
 
+def row_height(content):
+    kind = content[0] if isinstance(content, tuple) else None
+    if kind == 'frame':
+        return sum(row_height(r) for r in content[1]) + 2
+    if kind == 'indent':
+        return sum(row_height(r) for r in content[2])
+    if kind == 'scene':
+        return 6
+    return 1
+
+
 def height(rows):
-    return sum(len(r[0][1]) + 2 if r[0][0] == 'frame' else 6 if r[0][0] == 'scene' else 1 for r in rows)
+    return sum(row_height(r[0]) for r in rows)
 
 
 def clip(runs, room):
     """Runs cut to `room` columns, ending in … where cut, as the pane's truncate-end does."""
-    if sum(len(t) for t, _, _ in runs) <= room:
+    if sum(len(r[0]) for r in runs) <= room:
         return runs
     out, left = [], room - 1
-    for text, color, bold in runs:
-        out.append((text[:left], color, bold))
+    for text, color, bold, bg in runs:
+        out.append((text[:left], color, bold, bg))
         left -= len(out[-1][0])
         if left <= 0:
-            out.append(('…', color, bold))
+            out.append(('…', color, bold, bg))
             break
     return out
 
 
 def draw_runs(d, runs, col, y, room=W - 1):
-    for text, color, bold in clip(runs, room - col):
+    for text, color, bold, bg in clip(runs, room - col):
         for ch in text:
             x = PAD + col * CW
+            if bg is not None:
+                d.rectangle([x, y, x + CW - 1, y + CH - 1], fill=bg)
             if ch == '█':
                 d.rectangle([x, y + 2, x + CW - 1, y + CH - 3], fill=color)
             else:
                 d.text((x, y + 1), ch, font=BOLD if bold else FONT, fill=color)
             col += 1
     return col
+
+
+def draw_row(d, content, y, left, right, cells=None, ask=False):
+    """One row (of any kind) between columns left and right; returns the y after it."""
+    kind = content[0] if isinstance(content, tuple) else None
+    if kind == 'scene':
+        draw_scene(d, cells, y, ask)
+        return y + 6 * CH
+    if kind == 'frame':
+        inner = content[1]
+        color = content[2] if len(content) > 2 else DIM
+        fill = content[3] if len(content) > 3 else None
+        x0, x1 = PAD + left * CW + CW // 2, PAD + right * CW - CW // 2
+        d.rounded_rectangle([x0, y + CH // 2, x1, y + (row_height(content) - 1) * CH + CH // 2],
+                            radius=10, outline=color, width=2, fill=fill)
+        y += CH
+        for r in inner:
+            y = draw_row(d, r, y, left + 2, right - 2, cells, ask)
+        return y + CH
+    if kind == 'indent':
+        # ('indent', columns, rows, columns off the right too)
+        inset = content[3] if len(content) > 3 else 0
+        for r in content[2]:
+            y = draw_row(d, r, y, left + content[1], right - inset, cells, ask)
+        return y
+    if kind == 'split':
+        width = sum(len(r[0]) for r in content[2])
+        draw_runs(d, content[1], left, y, right - width - 1)
+        draw_runs(d, content[2], right - width, y, right)
+        return y + CH
+    draw_runs(d, content, left, y, right)
+    return y + CH
 
 
 def draw_badge(d, n, y):
@@ -289,24 +381,9 @@ def draw(rows, cells, ask=False):
     y = PAD
     for content, badge in rows:
         top = y
-        if content[0] == 'scene':
-            draw_scene(d, cells, y, ask)
-            y += 6 * CH
-        elif content[0] == 'frame':
-            inner = content[1]
-            color = content[2] if len(content) > 2 else DIM
-            fill = content[3] if len(content) > 3 else None
-            x0, x1 = PAD + CW // 2, PAD + (W - 1) * CW - CW // 2
-            d.rounded_rectangle([x0, y + CH // 2, x1, y + (len(inner) + 1) * CH + CH // 2],
-                                radius=10, outline=color, width=2, fill=fill)
-            for i, runs in enumerate(inner):
-                draw_runs(d, runs, 2, y + (i + 1) * CH)
-            y += (len(inner) + 2) * CH
-        else:
-            draw_runs(d, content, 0, y)
-            y += CH
+        y = draw_row(d, content, y, 0, W - 1, cells, ask)
         if badge is not None:
-            draw_badge(d, badge, top if content[0] != 'frame' else top + CH)
+            draw_badge(d, badge, top + CH if isinstance(content, tuple) and content[0] == 'frame' else top)
     return img
 
 
@@ -326,6 +403,7 @@ render('waiting', waiting_rows(), cells['waiting'], ask=True)
 render('session', session_rows(), None)
 render('property', property_rows(), None)
 render('skills', skills_rows(), None)
+render('tree', tree_rows(), None)
 render('party', party_rows(), None)
 render('events', events_rows(), None)
 render('setting', setting_rows(), None)

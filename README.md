@@ -20,7 +20,7 @@ To update later, press `[Update]` under [Setting](#setting).
 
 ## Session
 
-<img src="docs/session.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners">
+<img src="docs/session.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners, [≡] at its left, and under it three recent sessions with how long ago each was used">
 
 At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename typed at the prompt shows after the next one.
 
@@ -58,7 +58,7 @@ Below them: the cache hit rate, the tokens used, the iterations, and the latest 
 
 ## Skill Box
 
-<img src="docs/skills.png" width="340" alt="Skill Box open: a Prompt for skill field holding 30, General open in a rounded box with [Unload] and [timer], Code closed with one skill">
+<img src="docs/skills.png" width="340" alt="Skill Box open: a Prompt for skill field holding 30; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
 
 | Button | What it does |
 | --- | --- |
@@ -73,6 +73,8 @@ Below them: the cache hit rate, the tokens used, the iterations, and the latest 
 Skills are added with `/slime-dashboard add` (see [Usage](#usage)).
 
 ## Skill Tree
+
+<img src="docs/tree.png" width="340" alt="Skill Tree open: tabs Run-Test and Nightly*, then Run-Test under a purple banner with [Rename]; three wave boxes, each with ▲ ▼ ✕ and its skills (a model swatch, the skill, its model and subagent type), a condition and an arrow between them, then + Wave and [Save] [Delete]">
 
 Party Combos: your Skill Box skills chained into waves, each skill run by a subagent with the model and subagent type you pick, and Claude leading the whole run. The waves run in order; the skills of one wave all start at once, and the next wave waits for them all. For example, build, then unit-test, then check the result on Sonnet while Haiku archives the logs, at the same time.
 
