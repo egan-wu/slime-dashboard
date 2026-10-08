@@ -173,7 +173,31 @@ const unit = (n: number, seed: number) => (Math.imul((n ^ seed) | 0, 2654435761)
 export const treeKind = (worldX: number) => Math.floor(unit(worldX, 0x3a7) * TREES.length)
 
 // World x of every tree or rock whose left edge lies in [from, to).
+// For the README's looping picture only: the road repeats every `period`
+// pixels (a multiple of the grass stripe's 8), so the last frame of a walk
+// one period long leads back into the first. Undefined, as in the pane, it
+// never repeats. Things too near a period's end to fit are left out, so the
+// seam never splits one.
+let loopPeriod: number | undefined
+export function setLoop(period: number | undefined): void {
+  loopPeriod = period
+}
+function looped(from: number, to: number, width: number, inPeriod: (from: number, to: number) => number[]): number[] {
+  const P = loopPeriod!
+  const base = inPeriod(0, P).filter(x => x + width + 2 <= P)
+  const found: number[] = []
+  for (let n = Math.floor(from / P) - 1; n * P < to; n++) {
+    for (const x of base) if (x + n * P >= from && x + n * P < to) found.push(x + n * P)
+  }
+  return found
+}
+
 export function scattered(layer: 'tree' | 'rock', from: number, to: number): number[] {
+  if (loopPeriod === undefined) return scatteredAlong(layer, from, to)
+  const width = SCATTER.find(s => s.layer === layer)!.sprite.rows[0]!.length
+  return looped(from, to, width, (a, b) => scatteredAlong(layer, a, b))
+}
+function scatteredAlong(layer: 'tree' | 'rock', from: number, to: number): number[] {
   const sc = SCATTER.find(s => s.layer === layer)!
   const found: number[] = []
   for (let k = Math.floor(from / sc.span) - 1; k * sc.span < to; k++) {
@@ -199,6 +223,10 @@ const GAPE_REACH = 3
 
 // World x (in the rocks' frame) of every blob whose left edge lies in [from, to).
 export function goos(from: number, to: number): number[] {
+  if (loopPeriod !== undefined) return looped(from, to, GOO_W, goosAlong)
+  return goosAlong(from, to)
+}
+function goosAlong(from: number, to: number): number[] {
   const sc = GOO_SCATTER
   const found: number[] = []
   for (let k = Math.floor(from / sc.span) - 1; k * sc.span < to; k++) {
@@ -586,7 +614,7 @@ export function frame(
   }
   // Landmarks first, so the trees scattered along the road stand in front.
   const treeAt = Math.floor(off.tree)
-  for (const mark of LANDMARKS) draw(mark.sprite, mark.x - treeAt, GROUND_Y - 1)
+  if (loopPeriod === undefined) for (const mark of LANDMARKS) draw(mark.sprite, mark.x - treeAt, GROUND_Y - 1)
   for (const sc of SCATTER) {
     const at = Math.floor(off[sc.layer])
     const width = sc.sprite.rows[0]!.length

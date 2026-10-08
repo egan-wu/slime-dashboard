@@ -22,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(ROOT, 'hooks')
 DOCS = os.path.join(ROOT, 'docs')
 W = 33  # the pane's columns
-GIF_FRAMES = 80  # top.gif: eight seconds of the walk
+GIF_FRAMES = 120  # top.gif: twelve seconds of the walk, one loop of the road
 CW, CH, PAD = 18, 36, 24  # a cell's pixels, and the margin
 MARGIN = 3  # columns right of the pane for badges
 FONT = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 29)
@@ -51,18 +51,22 @@ def scenes():
                 f.write(text)
         with open(os.path.join(tmp, 'cells.ts'), 'w') as f:
             f.write("""
-import { frame, ROWS, step } from './scene.ts'
+import { frame, ROWS, setLoop } from './scene.ts'
 const W = %d
 const decode = (b64: string) => { const b = Buffer.from(b64, 'base64'); const u = new Uint32Array(b.buffer, b.byteOffset, b.length / 4); return Array.from({ length: ROWS }, (_, r) => Array.from(u.slice(r * W * 3, (r + 1) * W * 3))) }
 const off = (n: number) => ({ cloud: 23 + n, bird: 40, tree: 52 + n, rock: 31 + n, ground: 9 })
 const troop = [{ model: 'claude-haiku-5-5', pos: 0 }, { model: 'claude-sonnet-5-5', pos: 1 }]
-// The walk, frame by frame, as the pane plays it at ten frames a second.
-const walk = off(28)
-const walkingFrames = Array.from({ length: %d }, (_, t) => {
-  const cells = decode(frame(W, walk, 12 + t, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }))
-  step(walk, true)
-  return cells
+// The walk, frame by frame at ten a second, made to loop: the road repeats
+// every LOOP pixels and the walk covers exactly one, while the clouds and
+// birds drift exactly one span of theirs, so the last frame leads into the first.
+const T = %d, LOOP = T * 0.8
+setLoop(LOOP)
+const walkingFrames = Array.from({ length: T }, (_, t) => {
+  const road = 40 + t * 0.8
+  const at = { cloud: 23 + (t * 50) / T, bird: 40 + (t * 75) / T, tree: road, rock: road, ground: road }
+  return decode(frame(W, at, t, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }))
 })
+setLoop(undefined)
 console.log(JSON.stringify({
   walkingFrames,
   asleep: decode(frame(W, off(0), 7, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' })),
@@ -268,7 +272,10 @@ def render(name, rows, cells, ask=False):
 
 def render_gif(name, rows, frames):
     """An animated picture: the rows drawn over each frame of the scene, 10 fps, looping."""
-    imgs = [draw(rows, cells).quantize(colors=128, method=0) for cells in frames]
+    # One palette for every frame, so a color never shifts from one to the next.
+    full = [draw(rows, cells) for cells in frames]
+    palette = full[0].quantize(colors=255, method=0)
+    imgs = [img.quantize(palette=palette) for img in full]
     path = os.path.join(DOCS, f'{name}.gif')
     imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=100, loop=0, optimize=True, disposal=1)
     print(path, imgs[0].size, f'{len(imgs)} frames', f'{os.path.getsize(path) // 1024} KB')
