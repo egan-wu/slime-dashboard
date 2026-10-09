@@ -12,7 +12,7 @@ import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skills
 import type { Skill } from './skills'
 import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, SETTLE_MS, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
 import type { Mission, MissionState, RunStatus, SquadRun } from './squad'
 import { DUNGEON_ROWS, dungeonFrame } from './dungeon'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
@@ -1015,7 +1015,6 @@ async function refreshVitals($: EngineInterface) {
 // lighter to a darker grey along its length.
 const BAR = { hp: '#ff5c5c', mp: '#4db8ff' }
 // The Skill Box prompt's title banner: the MP blue deepened, so white reads on it.
-const PROMPT_BANNER = '#1f6fb8'
 const CP_FROM = 0x9e9e9e
 const CP_TO = 0x4a4a4a
 function cpColor(i: number, cells: number) {
@@ -1057,13 +1056,13 @@ async function setSkills($: EngineInterface, fn: (list: Skill[]) => Skill[]) {
   return list
 }
 
-// A skill's [▼]: it trades places with the one under it, in its category's
+// A skill's [▲]: it trades places with the one above it, in its category's
 // order as the store now holds it; the arrangement is kept.
-async function skillDown($: EngineInterface, category: string, names: string[], at: number) {
+async function skillUp($: EngineInterface, category: string, names: string[], at: number) {
   const name = names[at]
   const kept = orderMapFrom(await $.store.get(SKILL_ORDER_KEY))
   const now = inOrder(names, kept[category], n => n)
-  const next = { ...kept, [category]: name === undefined ? now : swapNames(now, now.indexOf(name)) }
+  const next = { ...kept, [category]: name === undefined ? now : swapNames(now, now.indexOf(name), -1) }
   await $.store.set(SKILL_ORDER_KEY, next)
   await update($, skillOrderAtom, () => next)
 }
@@ -1716,6 +1715,8 @@ export const register: Register = on => {
         const agents = await $.agent.list().catch(() => [])
         const busy = agents.some(a => a.parentId === e.agentId && !statusOfAgent(a.status))
         await setSquad($, missions => endLed(missions, e.agentId!, outcome, at, busy)).catch(() => {})
+        // A leader's mission is done once quiet a while: looked at again then.
+        if ((await read($, squadAtom).catch(() => [])).some(m => m.leader?.id === e.agentId && m.endedAt === undefined)) $.clock.after(SETTLE_MS + 200, () => void checkSquad($).catch(() => {}))
       } else {
         const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
         await setSquad($, missions => endMissions(missions, outcome, at)).catch(() => {})
@@ -2196,13 +2197,13 @@ export const register: Register = on => {
     const skillPieces = await read($, skillPiecesAtom)
     const tops = await read($, skillTopsAtom)
     const closed = await read($, skillCatsClosedAtom)
-    const topOf = (g: { category: string; skills: Skill[] }) =>
-      Math.max(0, Math.min(tops[g.category] ?? 0, Math.max(0, g.skills.length - SKILL_ROWS)))
-    const scroll = (g: { category: string; skills: Skill[] }, by: number) =>
-      update($, skillTopsAtom, t => ({
-        ...t,
-        [g.category]: Math.max(0, Math.min((t[g.category] ?? 0) + by, Math.max(0, g.skills.length - SKILL_ROWS))),
-      }))
+    // A category shows SKILL_ROWS skills a page; `tops` keeps the first row
+    // of the page it is on.
+    const pagesOf = (g: { skills: Skill[] }) => Math.max(1, Math.ceil(g.skills.length / SKILL_ROWS))
+    const pageOf = (g: { category: string; skills: Skill[] }, top = tops[g.category] ?? 0) => Math.max(0, Math.min(Math.floor(top / SKILL_ROWS), pagesOf(g) - 1))
+    const topOf = (g: { category: string; skills: Skill[] }) => pageOf(g) * SKILL_ROWS
+    const turn = (g: { category: string; skills: Skill[] }, by: -1 | 1) =>
+      update($, skillTopsAtom, t => ({ ...t, [g.category]: Math.max(0, Math.min(pageOf(g, t[g.category] ?? 0) + by, pagesOf(g) - 1)) * SKILL_ROWS }))
     const toggleCategory = (category: string) =>
       update($, skillCatsClosedAtom, c => (c.includes(category) ? c.filter(x => x !== category) : [...c, category]))
     const respawnAsking = await read($, respawnConfirmAtom)
@@ -2225,9 +2226,19 @@ export const register: Register = on => {
           </Box>
         </Box>
       )
-      // Each skill's [▼] trades places with the one under it.
-      const down = (at: number) => (
-        <Button key={`skill-down-${g.category}-${names[at]}`} label="[▼]" plain dimColor={at === names.length - 1} onPress={() => skillDown($, g.category, names, at)} />
+      // Each skill's [▲] trades places with the one above it (the page
+      // follows it when it goes over onto the one before).
+      const up = (at: number) => (
+        <Button
+          key={`skill-up-${g.category}-${names[at]}`}
+          label="[▲]"
+          plain
+          dimColor={at === 0}
+          onPress={async () => {
+            await skillUp($, g.category, names, at)
+            if (at > 0 && at - 1 < top) await update($, skillTopsAtom, t => ({ ...t, [g.category]: Math.floor((at - 1) / SKILL_ROWS) * SKILL_ROWS }))
+          }}
+        />
       )
       // Closed, a category is its button alone; open, a rounded box like
       // Setting's Display, its button at the top over its skills.
@@ -2249,7 +2260,7 @@ export const register: Register = on => {
               // The question keeps its width; only the description gives way.
               <Box key={`skill-row-${skill.name}`} flexDirection="row">
                 <Box flexDirection="row" flexShrink={0}>
-                  {down(top + k)}
+                  {up(top + k)}
                   <Text>{`[${skill.name}]: `}</Text>
                   <Button key="respawn-no" label="[N]" plain hover={{ scope: 'respawn-no', color: '#8a8a8a' }} onPress={() => update($, respawnConfirmAtom, () => false)} />
                   <Text>/</Text>
@@ -2263,7 +2274,7 @@ export const register: Register = on => {
               </Box>
             ) : (
               <Box key={`skill-row-${skill.name}`} flexDirection="row">
-                {down(top + k)}
+                {up(top + k)}
                 {g.category === COMBO_CATEGORY ? (
                   <Button
                     key={`combo-${skill.name}`}
@@ -2287,10 +2298,17 @@ export const register: Register = on => {
             ),
           )}
           {g.skills.length > SKILL_ROWS && (
-            <Box flexDirection="row" gap={1} marginLeft={2}>
-              <Button key={`skills-up-${g.category}`} label="▲" plain onPress={() => scroll(g, -1)} />
-              <Button key={`skills-down-${g.category}`} label="▼" plain onPress={() => scroll(g, 1)} />
-              <Text dimColor>{`${top + 1}-${Math.min(top + SKILL_ROWS, g.skills.length)}/${g.skills.length}`}</Text>
+            // A line parts the pager from the skills, which it starts under
+            // where their [▲] do, its two arrows side by side.
+            <Box flexDirection="column">
+              <Text dimColor>{'─'.repeat(Math.max(1, (columns || OPEN.columns) - 1 - 4))}</Text>
+              <Box flexDirection="row" gap={1}>
+                <Box flexDirection="row">
+                  <Button key={`skills-prev-${g.category}`} label="[◀]" plain dimColor={pageOf(g) === 0} onPress={() => turn(g, -1)} />
+                  <Button key={`skills-next-${g.category}`} label="[▶]" plain dimColor={pageOf(g) === pagesOf(g) - 1} onPress={() => turn(g, 1)} />
+                </Box>
+                <Text dimColor>{`${pageOf(g) + 1}/${pagesOf(g)}`}</Text>
+              </Box>
             </Box>
           )}
         </Box>
@@ -2312,17 +2330,28 @@ export const register: Register = on => {
               // it stands at that width: inside a frame, its second row spills
               // past a box that does not grow for it.
               <Box flexDirection="column">
-                {/* [Clear] at the title's right takes every piece out at once. */}
-                <Box flexDirection="row" justifyContent="space-between" alignItems="center" width={Math.max(8, (columns || OPEN.columns) - 1)}>
-                  <Box flexDirection="row" borderStyle="round" borderColor={BAR.mp}>
-                    <Box flexDirection="row" backgroundColor={PROMPT_BANNER} paddingX={1}>
+                {/* The title in the frame's top line, [Clear] at its right
+                    taking every piece out at once; the frame's bottom line
+                    closes it under the field. No sides: the field wraps its
+                    text at the pane's whole width, past any side drawn. */}
+                {(() => {
+                  const width = Math.max(8, (columns || OPEN.columns) - 1)
+                  const title = 'Prompt for skill'
+                  const clear = skillPieces.length > 0
+                  const tail = clear ? ' '.length + '[Clear]'.length + ' ─╮'.length : '╮'.length
+                  const fill = ' ' + '─'.repeat(Math.max(1, width - '╭ '.length - title.length - ' '.length - tail))
+                  return (
+                    <Box flexDirection="row" width={width}>
+                      <Text color={BAR.mp}>╭ </Text>
                       <Text bold color="#ffffff">
-                        Prompt for skill
+                        {title}
                       </Text>
+                      <Text color={BAR.mp}>{clear ? `${fill} ` : `${fill}╮`}</Text>
+                      {clear && <Button key="skill-pieces-clear" label="[Clear]" plain onPress={() => update($, skillPiecesAtom, () => [])} />}
+                      {clear && <Text color={BAR.mp}> ─╮</Text>}
                     </Box>
-                  </Box>
-                  {skillPieces.length > 0 && <Button key="skill-pieces-clear" label="[Clear]" plain onPress={() => update($, skillPiecesAtom, () => [])} />}
-                </Box>
+                  )
+                })()}
                 {/* Each piece kept with Enter, whole and wrapped in a frame of
                     its own, ▲ ▼ at its top right moving it, x taking it out. */}
                 {skillPieces.map((piece, i) => (
@@ -2339,7 +2368,7 @@ export const register: Register = on => {
                   key={skillPromptKey(skillPieces.length)}
                   // A space before the mark, in the label: a margin would push
                   // the field, as wide as the pane, past its edge.
-                  label=" ›"
+                  label=" ›:"
                   placeholder="type, Enter; then press a skill"
                   // What Enter does shows only while the field is empty.
                   submitLabel={skillPrompt === '' ? 'add' : ''}
@@ -2347,6 +2376,7 @@ export const register: Register = on => {
                   onInput={(value: string) => update($, skillPromptAtom, () => value)}
                   onSubmit={(value: string) => keepPiece($, value)}
                 />
+                <Text color={BAR.mp}>{`╰${'─'.repeat(Math.max(6, (columns || OPEN.columns) - 3))}╯`}</Text>
               </Box>
             )}
             {categories}

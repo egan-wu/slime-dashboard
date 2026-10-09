@@ -774,7 +774,7 @@ test('Setting: Performance picks High, Mid or Low, the current one bright', asyn
   await ui.unmount()
 })
 
-test('Skill Box: categories move with [▼][▲], a skill trades places with the next with its [▼]', async ($, on) => {
+test('Skill Box: categories move with [▼][▲], a skill trades places with the one above with its [▲]', async ($, on) => {
   mock.store(on)
   mock.clock(on)
   const manage = (args: string) =>
@@ -793,8 +793,39 @@ test('Skill Box: categories move with [▼][▲], a skill trades places with the
   expect(await cats()).toEqual(['skillcat-General', 'skillcat-Code'])
   const skills = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^skill-(lint|build|Unload|Respawn)$/.test(k))
   expect(await skills()).toEqual(['skill-Unload', 'skill-Respawn', 'skill-lint', 'skill-build'])
-  await ui.press({ key: 'skill-down-General-Unload' })
-  await ui.press({ key: 'skill-down-Code-lint' })
+  await ui.press({ key: 'skill-up-General-Respawn' })
+  await ui.press({ key: 'skill-up-Code-build' })
   expect(await skills()).toEqual(['skill-Respawn', 'skill-Unload', 'skill-build', 'skill-lint'])
+  await ui.unmount()
+})
+
+test('Skill Box: a category of more than five skills turns by page with [◀][▶], the page over the pages beside them', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  const manage = (args: string) =>
+    $.command.run({ command: PLUGIN, args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  for (let n = 1; n <= 7; n++) await manage(`add s${n} --category Code`)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  const shown = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^skill-s\d$/.test(k)).map(k => k.slice(6))
+  const page = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text ?? '').find(t => /^\d+\/\d+$/.test(t))
+  expect(await shown()).toEqual(['s1', 's2', 's3', 's4', 's5'])
+  expect(await page()).toBe('1/2')
+  await ui.press({ key: 'skills-next-Code' })
+  expect(await shown()).toEqual(['s6', 's7'])
+  expect(await page()).toBe('2/2')
+  // Past the last page nothing turns.
+  await ui.press({ key: 'skills-next-Code' })
+  expect(await page()).toBe('2/2')
+  // The first skill of a page trades with the last of the page before, and
+  // the page follows it.
+  await ui.press({ key: 'skill-up-Code-s6' })
+  expect(await shown()).toEqual(['s1', 's2', 's3', 's4', 's6'])
+  expect(await page()).toBe('1/2')
+  await ui.press({ key: 'skills-next-Code' })
+  expect(await shown()).toEqual(['s5', 's7'])
+  await ui.press({ key: 'skills-prev-Code' })
+  await ui.press({ key: 'skills-prev-Code' })
+  expect(await page()).toBe('1/2')
   await ui.unmount()
 })

@@ -82,6 +82,31 @@ console.log(JSON.stringify({
         return json.loads(out.stdout)
 
 
+def dungeon_scenes(width):
+    """The scene at the top of Dungeon (hooks/dungeon.ts): the slime resting on
+    guard, and the slime fighting while missions run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ('scene.ts', 'weather.ts', 'vitals.ts', 'dungeon.ts'):
+            with open(os.path.join(HOOKS, name)) as f:
+                text = re.sub(r"from '\./(\w+)'", r"from './\1.ts'", f.read())
+            with open(os.path.join(tmp, name), 'w') as f:
+                f.write(text)
+        with open(os.path.join(tmp, 'cells.ts'), 'w') as f:
+            f.write("""
+import { dungeonFrame, DUNGEON_ROWS } from './dungeon.ts'
+const W = %d
+const decode = (b64: string) => { const b = Buffer.from(b64, 'base64'); const u = new Uint32Array(b.buffer, b.byteOffset, b.length / 4); return Array.from({ length: DUNGEON_ROWS }, (_, r) => Array.from(u.slice(r * W * 3, (r + 1) * W * 3))) }
+console.log(JSON.stringify({
+  rows: DUNGEON_ROWS,
+  guard: decode(dungeonFrame(W, 0, 'claude-opus-5-5', 0, 12)),
+  fight: decode(dungeonFrame(W, 3, 'claude-opus-5-5', 2, 12)),
+}))
+""" % width)
+        out = subprocess.run(['node', '--experimental-strip-types', '--no-warnings', 'cells.ts'],
+                             cwd=tmp, capture_output=True, text=True, check=True)
+        return json.loads(out.stdout)
+
+
 # A row is a list of runs (text, color, bold, background), or ('scene',), or
 # ('frame', rows, edge, fill) for a rounded frame around some rows (frames
 # nest), or ('split', left runs, right runs) for a row with buttons at its
@@ -192,24 +217,33 @@ def journal_rows():
     return section('Journal', block)
 
 
-PROMPT_BANNER = (31, 111, 184)
-
-
 def skills_rows():
+    up = lambda dim=False: run('[▲]', DIM if dim else FG)
+    # The prompt's frame has a top and a bottom line, no sides: the field wraps
+    # at the pane's whole width.
+    dashes = lambda n: run('─' * n, MP)
     return section(
         'Skill Box',
-        ('box', [run(' Prompt for skill ', (255, 255, 255), True, PROMPT_BANNER)], MP, [run('[Clear]')]),
+        [run('╭ ', MP), run('Prompt for skill', (255, 255, 255), True), run(' ', MP), dashes(2), run(' ', MP), run('[Clear]'), run(' ─╮', MP)],
         ('frame', [('split', [run('only slow tests')], [run('▲ ▼ x', DIM)])], MP),
         ('frame', [('split', [run('30')], [run('▲ ▼ x', DIM)])], MP),
         [run(' ›: '), run('type, Enter; then press a skill', DIM)],
+        [run('╰', MP), dashes(W - 3), run('╯', MP)],
         ('frame', [('split', [run('▼ General')], MOVE),
-                   [run('[▼]'), run('[Unload]'), run(': compact context window', DIM)],
-                   [run('[▼]'), run('[Respawn]'), run(': create new session', DIM)],
-                   [run('[▼]', DIM), run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
-        ('indent', 2, [('split', [run('▸ Code (1)')], MOVE)], 2),
+                   [up(True), run('[Unload]'), run(': compact context window', DIM)],
+                   [up(), run('[Respawn]'), run(': create new session', DIM)],
+                   [up(), run('[timer]'), run(': background timer, prompt = seconds', DIM)]]),
+        ('frame', [('split', [run('▼ Code')], MOVE),
+                   [up(True), run('[build]'), run(': build the project', DIM)],
+                   [up(), run('[lint]'), run(': lint the sources', DIM)],
+                   [up(), run('[test]'), run(': run the tests', DIM)],
+                   [up(), run('[deploy]'), run(': ship it', DIM)],
+                   [up(), run('[docs]'), run(': write the docs', DIM)],
+                   [run('─' * (W - 5), DIM)],
+                   [run('[◀]', DIM), run('[▶]'), run(' '), run('1/2', DIM)]]),
         ('frame', [('split', [run('▼ Party Combo')], MOVE),
-                   [run('[▼]'), run('[Run-Test]'), run(': 3 waves · 4 skills', DIM)],
-                   [run('[▼]', DIM), run('[Nightly]'), run(': 2 waves · 3 skills', DIM)]]),
+                   [up(True), run('[Run-Test]'), run(': 3 waves · 4 skills', DIM)],
+                   [up(), run('[Nightly]'), run(': 2 waves · 3 skills', DIM)]]),
     )
 
 
@@ -296,13 +330,15 @@ def card(fold, mark, color, title, word, extra=(), second=None):
 
 
 def dungeon_rows():
-    """Dungeon's tab, as wide as DUNGEON_W: a mission running with its waves
-    open, and one done, closed to a glance."""
+    """Dungeon's tab, as wide as DUNGEON_W: the scene on top, then a mission
+    running with its waves open, one done and one folded."""
     banner = lambda name, fold='▾': [run(f' {fold} {name} ', (255, 255, 255), True, PURPLE)]
-    x = [run('[', STOP), run('x'), run(']', STOP)]
+    x = [run('[x]')]
+    # How a mission stands, at its banner's right; ended, with [↻] before [x].
+    stand = lambda mark, word, color, again=False: [run(f' {mark} {word} ', color)] + ([run('[↻]')] if again else []) + x
     btn = lambda label: [run(' [', DIM), run(label), run(']', DIM)]
     running = ('frame', [
-        ('split', banner('RUN_TEST'), x),
+        ('split', banner('RUN_TEST'), stand('◐', 'running', GOLD)),
         ('split', [run('#21 · 2026-10-09 16:40', DIM)], [run('◐ ', GOLD, True), run('96K', GOLD)]),
         card(None, '◆', LILAC, 'Leader', 'leading', btn('Recall'),
              ('split', [run('  Sonnet', DIM)], [run('48s', DIM)])),
@@ -315,14 +351,19 @@ def dungeon_rows():
             card('▸', '✔', GREEN, '/demo-test', 'done'),
             [run('  ↓', DIM)],
             [run('Wave 3', FG, True), run(' · all at once', DIM)],
-            card('▾', '◐', GOLD, '/demo-check', 'running', btn('X'),
-                 ('split', [run('  Sonnet · general', DIM)], [run('step 3 · 6s', DIM)])),
+            ('frame', [
+                ('split', [run('▾ '), run('◐ ', GOLD), run('/demo-check', FG, True)], [run('running', GOLD)] + btn('X')),
+                ('split', [run('  Sonnet · general', DIM)], [run('step 3 · 6s', DIM)]),
+                # What the step sent out runs inside its card, and keeps it running.
+                [run('  ↳ ', DIM), run('◐ ', GOLD), run('look around')],
+                [run('      Haiku 5.5 · 4s', DIM)],
+            ], GOLD),
             card('▸', '✔', GREEN, '/demo-archive', 'done'),
             [run('◆ stop on pass, go on if fail', DIM)],
         ]),
     ], PURPLE)
     done = ('frame', [
-        ('split', banner('FAIL_PATH'), x),
+        ('split', banner('FAIL_PATH'), stand('✔', 'done', GREEN, True)),
         ('split', [run('#20 · 2026-10-09 16:32', DIM)], [run('● ', GOLD, True), run('152K', GOLD)]),
         ('frame', [
             ('split', [run('✔ ', GREEN), run('Leader', FG, True)], [run('done', GREEN)]),
@@ -332,10 +373,10 @@ def dungeon_rows():
         [run('▸ Waves'), run(' · 4 waves · 4/4 done · 1m 05s', DIM)],
     ], PURPLE)
     folded = ('frame', [
-        ('split', banner('SCOUT', '▸'), x),
-        ('split', [run('#19 · 2026-10-09 16:28', DIM)], [run('● ', GOLD, True), run('68K', GOLD)]),
+        ('split', banner('SCOUT', '▸'), stand('■', 'recalled', STOP, True)),
+        ('split', [run('#19 · 2026-10-09 16:28 · 1/3', DIM)], [run('● ', GOLD, True), run('68K', GOLD)]),
     ], PURPLE)
-    return [(('split', [], [run('[Clear All]')]), None), (running, None), (done, None), (folded, None)]
+    return [(('dscene',), None), (('split', [], [run('[Clear All]')]), None), (running, None), (done, None), (folded, None)]
 
 
 DUNGEON_W = 46  # Dungeon is a tab of its own, wider than the pane
@@ -355,6 +396,8 @@ def row_height(content):
         return sum(row_height(r) for r in content[2])
     if kind == 'scene':
         return 6
+    if kind == 'dscene':
+        return 8
     return 1
 
 
@@ -396,6 +439,9 @@ def draw_row(d, content, y, left, right, cells=None, ask=False):
     if kind == 'scene':
         draw_scene(d, cells, y, ask)
         return y + 6 * CH
+    if kind == 'dscene':
+        draw_scene(d, cells, y)
+        return y + 8 * CH
     if kind == 'frame':
         inner = content[1]
         color = content[2] if len(content) > 2 else DIM
@@ -521,4 +567,6 @@ render('party', party_rows(), None)
 render('events', events_rows(), None)
 render('setting', setting_rows(), None)
 W = DUNGEON_W
-render('dungeon', dungeon_rows(), None)
+dungeon = dungeon_scenes(DUNGEON_W)
+render('dungeon', dungeon_rows(), dungeon['fight'])
+render('dungeon-guard', [(('dscene',), None)], dungeon['guard'])

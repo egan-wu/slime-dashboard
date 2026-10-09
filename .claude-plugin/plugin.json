@@ -1,6 +1,6 @@
 {
   "name": "slime-dashboard",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A side pane where a slime hops along while Claude works and naps while idle, colored by the current model",
   "types": "./types/index.d.ts"
 }

@@ -274,25 +274,52 @@ export function agentsToFollow(missions: readonly Mission[], agents: readonly { 
   })
 }
 
+// How long a mission whose leader ended its turn stays quiet (nothing running)
+// before it counts as done: a leader waiting on its steps' reports ends its
+// turn between waves, and is woken to send the next.
+export const SETTLE_MS = 10_000
+
+// When the last run of a mission ended.
+const lastEnd = (m: Mission) => Math.max(0, ...runsOf([m]).map(r => r.endedAt ?? 0))
+
+// Whether a mission that finished done has been quiet long enough to be done:
+// a stop or a failure is not waited on.
+const calm = (m: Mission, outcome: Mission['outcome'], at: number) => outcome !== 'done' || at - lastEnd(m) >= SETTLE_MS
+
+// When a mission that ended is said to have: a done one, when its last run
+// ended (the quiet it waited out is no work); else now.
+const endOf = (m: Mission, outcome: Mission['outcome'], at: number) => (outcome === 'done' && lastEnd(m) > 0 ? lastEnd(m) : at)
+
 // The subagent under `id` ended its turn: a mission it led ends with it, but
 // not while a subagent of the mission still runs (`busy`: one the engine
-// lists that Dungeon may not have seen yet). A leader whose steps run in the
-// background ends its turn as it sends them, and is woken by their reports.
+// lists that Dungeon may not have seen yet), nor, if done, before it has been
+// quiet for SETTLE_MS (settleLed ends it then). A leader whose steps run in
+// the background ends its turn as it sends them, and is woken by their reports.
 export function endLed(missions: readonly Mission[], id: string, outcome: Mission['outcome'], at: number, busy = false): Mission[] | undefined {
   const m = missions.find(x => x.leader?.id === id)
-  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running' && !r.awaiting)) return undefined
-  return missions.map(x => (x === m ? settled({ ...x, endedAt: at, outcome }, at) : x))
+  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running' && !r.awaiting) || !calm(m, outcome, at)) return undefined
+  const end = endOf(m, outcome, at)
+  return missions.map(x => (x === m ? settled({ ...x, endedAt: end, outcome }, end) : x))
 }
 
 // Missions whose leader has ended its turn and that nothing else of runs any
-// more end now, as their leader did: what kept one going (a step, a step's
-// own helper) ended after the leader's last turn.
+// more end now, as their leader did, once quiet for SETTLE_MS: what kept one
+// going (a step, a step's own helper) ended after the leader's last turn.
 export function settleLed(missions: readonly Mission[], at: number): Mission[] | undefined {
-  const due = (m: Mission) =>
-    m.leader !== undefined && m.endedAt === undefined && m.leader.status !== 'running' && !runsOf([m]).some(r => r.status === 'running' && !r.awaiting)
-  if (!missions.some(due)) return undefined
   const outcome = (r: SquadRun): Mission['outcome'] => (r.status === 'completed' ? 'done' : r.status === 'stopped' ? 'stopped' : 'error')
-  return missions.map(m => (due(m) ? settled({ ...m, endedAt: at, outcome: outcome(m.leader!) }, at) : m))
+  const due = (m: Mission) =>
+    m.leader !== undefined &&
+    m.endedAt === undefined &&
+    m.leader.status !== 'running' &&
+    !runsOf([m]).some(r => r.status === 'running' && !r.awaiting) &&
+    calm(m, outcome(m.leader), at)
+  if (!missions.some(due)) return undefined
+  return missions.map(m => {
+    if (!due(m)) return m
+    const how = outcome(m.leader!)
+    const end = endOf(m, how, at)
+    return settled({ ...m, endedAt: end, outcome: how }, end)
+  })
 }
 
 // A mission that ended: a run still awaiting its background work is done

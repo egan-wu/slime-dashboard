@@ -169,20 +169,22 @@ export function dungeonFrame(columns: number, tick: number, model: string, going
   // The bubble at its upper left: the fight, and how many are going.
   if (fighting) {
     const bx = Math.max(boardR + 2, sx - BUBBLE_W + 3)
-    for (let y = 0; y <= 7; y++) {
+    // It starts a row down from the pane's top, so that the tab above does
+    // not run into it.
+    for (let y = 1; y <= 7; y++) {
       for (let x = bx; x < bx + BUBBLE_W; x++) {
-        if ((y === 0 || y === 7) && (x === bx || x === bx + BUBBLE_W - 1)) continue
+        if ((y === 1 || y === 7) && (x === bx || x === bx + BUBBLE_W - 1)) continue
         put(x, y, BUBBLE.fill)
       }
     }
     put(bx + BUBBLE_W - 2, 8, BUBBLE.fill)
     // A little slime lunges at a little monster; a spark where they meet.
     const ms = bx + 1 + (hit ? 1 : 0)
-    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) put(ms + dx, 3 + dy, info.body)
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) put(ms + dx, 4 + dy, info.body)
     const mx = bx + 4
-    for (let y = 2; y <= 4; y++) for (let x = mx; x <= mx + 2; x++) put(x, y, hit ? MONSTER.hit : MONSTER.body)
-    put(mx + 1, 3, hit ? BUBBLE.fill : MONSTER.eye)
-    if (hit) for (const [x, y] of [[mx, 2], [mx - 1, 3], [mx, 3], [mx + 1, 3], [mx, 4]] as const) put(x, y, SPARK)
+    for (let y = 3; y <= 5; y++) for (let x = mx; x <= mx + 2; x++) put(x, y, hit ? MONSTER.hit : MONSTER.body)
+    put(mx + 1, 4, hit ? BUBBLE.fill : MONSTER.eye)
+    if (hit) for (const [x, y] of [[mx, 3], [mx - 1, 4], [mx, 4], [mx + 1, 4], [mx, 5]] as const) put(x, y, SPARK)
     const n = `×${Math.min(going, 99)}`
     text(bx + Math.floor((BUBBLE_W - n.length) / 2), 3, n, BUBBLE.text, BUBBLE.fill)
   }
