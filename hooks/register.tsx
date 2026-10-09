@@ -62,6 +62,8 @@ const weatherAtom = atom({ plugin: 'slime-dashboard', key: 'weather' } as const,
 // The session's name as /resume lists it: the one /rename gave, else the one
 // Claude Code made up.
 const SIGN = { edge: '#5c3a1e', board: '#8b5a2b', text: '#f5e6c8' }
+// The red ! either side of a session not yet named, bright on the board.
+const UNNAMED_MARK = '#ff5a4f'
 const sessionTitleAtom = atom({ plugin: 'slime-dashboard', key: 'sessionTitle' } as const, '')
 // Pressing the sign opens a field under it for a new name (renameDraft).
 const renameOpenAtom = atom({ plugin: 'slime-dashboard', key: 'renameOpen' } as const, false)
@@ -88,6 +90,9 @@ const waitingAtom = atom({ plugin: 'slime-dashboard', key: 'waiting' } as const,
 const skillsAtom = atom({ plugin: 'slime-dashboard', key: 'skills' } as const, [] as Skill[])
 const skillsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'skillsOpen' } as const, false)
 const skillPromptAtom = atom({ plugin: 'slime-dashboard', key: 'skillPrompt' } as const, '')
+// Each Enter in the prompt field keeps what it held as a piece of its own, in
+// a frame with an [x]; a skill pressed sends them all, in order, as its prompt.
+const skillPiecesAtom = atom({ plugin: 'slime-dashboard', key: 'skillPieces' } as const, [] as string[])
 // Per category: the first of its five rows shown, and whether it is closed
 // (a category is open until closed).
 const skillTopsAtom = atom({ plugin: 'slime-dashboard', key: 'skillTops' } as const, {} as Record<string, number>)
@@ -456,17 +461,22 @@ async function resumeSession($: EngineInterface, s: SlimeRecentSession) {
 }
 
 // The sign pressed: closed, it opens the field holding the current name;
-// open, it renames the session with /rename to what the field holds and
-// closes. A field left empty or unchanged just closes, renaming nothing,
-// and Event Message keeps the old name, should a rename need undoing.
+// open, it renames with what the field holds, as Enter in the field does.
 async function pressSign($: EngineInterface) {
   if (!(await read($, renameOpenAtom))) {
     await update($, renameDraftAtom, () => '')
     await update($, renameOpenAtom, () => true)
     return
   }
+  await renameTo($, await read($, renameDraftAtom))
+}
+
+// Renames the session with /rename and closes the field. A name left empty
+// or unchanged just closes, renaming nothing, and Event Message keeps the old
+// name, should a rename need undoing.
+async function renameTo($: EngineInterface, value: string) {
   const old = await read($, sessionTitleAtom)
-  const next = (await read($, renameDraftAtom)).trim()
+  const next = value.trim()
   await update($, renameOpenAtom, () => false)
   if (!next || next === old) return
   await $.command.run({ command: 'rename', args: next })
@@ -821,18 +831,46 @@ async function moveCategory($: EngineInterface, categories: string[], at: number
   await update($, catOrderAtom, () => next)
 }
 
+// The Skill Box's prompt: the pieces kept with Enter, then anything still in
+// the field, a blank line between.
+async function skillInput($: EngineInterface): Promise<string> {
+  const parts = [...(await read($, skillPiecesAtom)), await read($, skillPromptAtom)]
+  return parts.map(p => p.trim()).filter(p => p !== '').join('\n\n')
+}
+
+// Sent: the pieces go and the field clears.
+async function clearSkillInput($: EngineInterface) {
+  await update($, skillPiecesAtom, () => [])
+  await update($, skillPromptAtom, () => '')
+}
+
+// The prompt field's key, new with each piece: the focus ring holds a place
+// in the pane, not an element, so the piece's [x] drawn before the field would
+// take it. Under a new key, the focus below waits for the field drawn after.
+const skillPromptKey = (pieces: number) => `skill-prompt-${pieces}`
+
+// Enter in the prompt field: what it holds becomes a piece, the field clears
+// and keeps the keys, ready for the next piece.
+async function keepPiece($: EngineInterface, value: string) {
+  if (value.trim() === '') return
+  await update($, skillPiecesAtom, pieces => [...pieces, value.trim()])
+  await update($, skillPromptAtom, () => '')
+  const pieces = await read($, skillPiecesAtom)
+  await $.ui.focus({ requestId: PANE, key: skillPromptKey(pieces.length) }).catch(() => undefined)
+}
+
 // A skill's button: run it as the person would type it, with the Skill Box's
-// prompt after it in quotes when one is typed; the field then clears.
+// prompt after it in quotes when one is typed; the pieces then clear.
 async function runSkill($: EngineInterface, skill: Skill) {
   const name = skill.command ?? skill.name
-  const prompt = (await read($, skillPromptAtom)).trim()
+  const prompt = await skillInput($)
   const args = prompt === '' ? '' : `"${prompt.replace(/"/g, '\\"')}"`
   const typed = `/${name}${args === '' ? '' : ` ${args}`}`
   // Said at once, since the run itself waits until the session is idle.
   $.ui.toast(`Skill Box: sending ${typed}`)
   try {
     await $.command.run({ command: name, args })
-    await update($, skillPromptAtom, () => '')
+    await clearSkillInput($)
     await logEvent($, `Skill sent: ${typed}`)
   } catch (error) {
     // An unknown skill (not in this session's slash commands) lands here; the
@@ -926,9 +964,9 @@ async function deleteCombo($: EngineInterface, tab: string) {
 }
 
 // A combo's button: the main model is asked to lead it, with the Skill Box's
-// prompt as its input; the field then clears.
+// prompt as its input; the pieces then clear.
 async function runCombo($: EngineInterface, combo: Combo) {
-  const input = await read($, skillPromptAtom)
+  const input = await skillInput($)
   const text = comboPrompt(combo, input)
   if (text === undefined) {
     $.ui.toast(`Party Combo: ${combo.name} has no skill yet`)
@@ -937,7 +975,7 @@ async function runCombo($: EngineInterface, combo: Combo) {
   $.ui.toast(`Party Combo: sending ${combo.name}`)
   try {
     await $.prompt.submit({ text })
-    await update($, skillPromptAtom, () => '')
+    await clearSkillInput($)
     await logEvent($, `Combo sent: ${combo.name}`)
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
@@ -1748,6 +1786,7 @@ export const register: Register = on => {
     const categoryNames = groups.map(g => g.category)
     const skillsOpen = await read($, skillsOpenAtom)
     const skillPrompt = await read($, skillPromptAtom)
+    const skillPieces = await read($, skillPiecesAtom)
     const tops = await read($, skillTopsAtom)
     const closed = await read($, skillCatsClosedAtom)
     const topOf = (g: { category: string; skills: Skill[] }) =>
@@ -1863,17 +1902,33 @@ export const register: Register = on => {
               // The prompt field stands out: a bright frame with a bold title,
               // a prompt mark before the field, and how to use it while empty.
               <Box flexDirection="column" borderStyle="round" borderColor={BAR.mp} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
-                <Text bold color={BAR.mp}>
-                  Prompt for skill
-                </Text>
+                {/* [Clear] at the title's right takes every piece out at once. */}
+                <Box flexDirection="row" justifyContent="space-between">
+                  <Text bold color={BAR.mp}>
+                    Prompt for skill
+                  </Text>
+                  {skillPieces.length > 0 && <Button key="skill-pieces-clear" label="[Clear]" plain onPress={() => update($, skillPiecesAtom, () => [])} />}
+                </Box>
+                {/* Each piece kept with Enter, whole and wrapped in a frame of
+                    its own, [x] at its top right taking it out. */}
+                {skillPieces.map((piece, i) => (
+                  <Box key={`skill-piece-${i}`} flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="round" borderColor={BAR.mp} paddingX={1}>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                      <Text wrap="wrap">{piece}</Text>
+                    </Box>
+                    <Button key={`skill-piece-x-${i}`} label="x" plain dimColor onPress={() => update($, skillPiecesAtom, ps => ps.filter((_, k) => k !== i))} />
+                  </Box>
+                ))}
                 <Input
-                  key="skill-prompt"
+                  key={skillPromptKey(skillPieces.length)}
                   label="›"
-                  placeholder="type, then press a skill"
-                  submitLabel="keep"
+                  placeholder="type, Enter; then press a skill"
+                  // What Enter does shows only while the field is empty: drawn
+                  // at its right, it would cover the end of what is typed.
+                  submitLabel={skillPrompt === '' ? 'add' : ''}
                   value={skillPrompt}
                   onInput={(value: string) => update($, skillPromptAtom, () => value)}
-                  onSubmit={(value: string) => update($, skillPromptAtom, () => value)}
+                  onSubmit={(value: string) => keepPiece($, value)}
                 />
               </Box>
             )}
@@ -2130,7 +2185,10 @@ export const register: Register = on => {
           <Button key="sessions" label="[≡]" plain hover={{ scope: 'sessions', color: SIGN.text, bold: true }} onPress={() => pressSessions($)} />
           {/* The name stays centered: the [≡]'s width again on the right. */}
           <Box flexDirection="row" justifyContent="center" flexGrow={1} flexShrink={1} minWidth={0}>
-            <Button key="sign" label={title || '—'} plain hover={{ scope: 'sign', color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+            {/* A new session has no name yet: a journey still to be named. */}
+            {!title && <Text color={UNNAMED_MARK}>{' ! '}</Text>}
+            <Button key="sign" label={title || 'Mystic Journey'} plain hover={{ scope: 'sign', color: SIGN.text, bold: true }} onPress={() => pressSign($)} />
+            {!title && <Text color={UNNAMED_MARK}>{' ! '}</Text>}
           </Box>
           <Box width={3} flexShrink={0} />
         </Box>
@@ -2155,11 +2213,12 @@ export const register: Register = on => {
             <Input
               key="rename"
               label="›"
-              placeholder="new name, then press the sign"
-              submitLabel="keep"
+              placeholder="new name, then Enter"
+              submitLabel="rename"
+              autoFocus
               value={draft}
               onInput={(value: string) => update($, renameDraftAtom, () => value)}
-              onSubmit={(value: string) => update($, renameDraftAtom, () => value)}
+              onSubmit={(value: string) => renameTo($, value)}
             />
             <Button key="rename-cancel" label="[x]" plain onPress={() => update($, renameOpenAtom, () => false)} />
           </Box>

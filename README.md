@@ -22,11 +22,11 @@ To update later, press `[Update]` under [Setting](#setting).
 
 <img src="docs/session-sign.png" width="340" alt="The session's name in cream letters on a brown wooden sign with rounded corners, [≡] at its left, and under it three recent sessions with how long ago each was used">
 
-At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. It follows each prompt, so a rename typed at the prompt shows after the next one.
+At the top, the session's name on a wooden sign: the one `/rename` gave it, else the one Claude Code made up. A new session with neither shows ` ! Mystic Journey ! `, the `!`s in red. It follows each prompt, so a rename typed at the prompt shows after the next one.
 
 `[≡]` at the sign's left lists this project's recent sessions under it, newest first: each by its name (the `/rename` one, else Claude Code's, else when it was last used) with how long ago (`5m`, `3h`, `2d`). Pressing one resumes it (`/resume`); `[≡]` again closes the list. The session you are in, and any never typed into, are left out.
 
-The sign is also a button. Pressed, it opens a field under it; type a new name, then press the sign again to run `/rename` with it. Enter only keeps the text. A field left empty or unchanged closes without renaming, and `[x]` beside it closes it too. A rename is logged in Event Message as `Renamed: old → new`, so a wrong one can be undone by renaming back.
+The sign is also a button. Pressed, it opens a field under it; type a new name and press Enter (or the sign again) to run `/rename` with it. A field left empty or unchanged closes without renaming, and `[x]` beside it closes it too. A rename is logged in Event Message as `Renamed: old → new`, so a wrong one can be undone by renaming back.
 
 ## HP / MP / CP, the slime and the model buttons
 
@@ -75,11 +75,11 @@ Below them: the cache hit rate, the cache's time to live (`1h` or `5m`: `(env)` 
 
 ## Skill Box
 
-<img src="docs/skills.png" width="340" alt="Skill Box open: a Prompt for skill field holding 30; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
+<img src="docs/skills.png" width="340" alt="Skill Box open: Prompt for skill with two framed pieces, only the slow tests and 30, each with an x, above an empty field; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
 
 | Button | What it does |
 | --- | --- |
-| Prompt for skill | Type here; the next skill you press is sent with it. Enter keeps the text, it does not send. |
+| Prompt for skill | Type, then Enter: the text becomes a piece in a frame of its own above the field, `x` at its right taking it out, and `[Clear]` at the title's right taking them all out. After Enter the field keeps the keys for the next piece. Type as many pieces as you like; the next skill you press is sent with them all, in order (and anything still in the field), and they clear. |
 | `▼ General` / `▸ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | `[▼]` `[▲]` (right of a category) | Moves the category a place down or up, kept across sessions. |
 | `[▼]` (before a skill) | Trades places with the skill under it, kept across sessions. |

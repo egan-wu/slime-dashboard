@@ -46,6 +46,7 @@ declare module 'claude-code' {
       skills: SlimeSkill[]
       skillsOpen: boolean
       skillPrompt: string
+      skillPieces: string[]
       skillTops: Record<string, number>
       skillCatsClosed: string[]
       skillOrder: Record<string, string[]>

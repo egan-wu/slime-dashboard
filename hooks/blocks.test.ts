@@ -92,9 +92,35 @@ test('the Skill Box sends a skill with the typed prompt, the Property block open
     expect(await ui.find({ key: 'skill-run-unit-test' })).toBeUndefined()
     await ui.press({ key: 'skills-toggle' })
     expect((await ui.find({ key: 'skill-run-unit-test' }))?.text).toBe('[run-unit-test]')
-    await ui.input({ key: 'skill-prompt', text: 'only the vitals tests', kind: 'change' })
+    await ui.input({ key: 'skill-prompt-0', text: 'only the vitals tests', kind: 'change' })
     await ui.press({ key: 'skill-run-unit-test' })
     expect(ran).toEqual(['"only the vitals tests"'])
+
+    // Typing shows nothing yet; each Enter keeps the text as a framed piece.
+    const piece = (text: string) => ui.find({ type: 'Text', text })
+    await ui.input({ key: 'skill-prompt-0', text: 'first part', kind: 'change' })
+    expect(await piece('first part')).toBeUndefined()
+    await ui.input({ key: 'skill-prompt-0', text: 'first part' })
+    await ui.input({ key: 'skill-prompt-1', text: 'oops' })
+    await ui.input({ key: 'skill-prompt-2', text: 'second part' })
+    await ui.input({ key: 'skill-prompt-3', text: '   ' })
+    expect(await piece('first part')).toBeDefined()
+    expect(await piece('oops')).toBeDefined()
+    // [x] takes a piece out; a skill sends the rest, in order, then they clear.
+    await ui.press({ key: 'skill-piece-x-1' })
+    expect(await piece('oops')).toBeUndefined()
+    await ui.press({ key: 'skill-run-unit-test' })
+    expect(ran.at(-1)).toBe('"first part\n\nsecond part"')
+    expect(await piece('first part')).toBeUndefined()
+    expect(await ui.find({ key: 'skill-piece-x-0' })).toBeUndefined()
+    // [Clear] shows only with pieces, and takes them all out.
+    expect(await ui.find({ key: 'skill-pieces-clear' })).toBeUndefined()
+    await ui.input({ key: 'skill-prompt-0', text: 'one' })
+    await ui.input({ key: 'skill-prompt-1', text: 'two' })
+    await ui.press({ key: 'skill-pieces-clear' })
+    expect(await piece('one')).toBeUndefined()
+    expect(await piece('two')).toBeUndefined()
+    expect(await ui.find({ key: 'skill-pieces-clear' })).toBeUndefined()
 
     await ui.press({ key: 'props-toggle' })
     expect(await ui.find({ type: 'Text', text: /Cache Hit Rate/ })).toBeDefined()
@@ -292,7 +318,7 @@ test('a skill that does not run says why and keeps the prompt', async ($, on) =>
   await manage('add nope')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'skills-toggle' })
-  await ui.input({ key: 'skill-prompt', text: '30', kind: 'change' })
+  await ui.input({ key: 'skill-prompt-0', text: '30', kind: 'change' })
   await ui.press({ key: 'skill-nope' })
   expect(toasts.some(t => t.includes('sending /nope "30"'))).toBe(true)
   expect(toasts.some(t => t.includes('/nope "30" did not run'))).toBe(true)
@@ -582,16 +608,20 @@ test('the session name stands on a wooden sign, updated by each prompt, /rename 
   on('classic.UserPromptSubmit', async () => ({}))
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const shown = async (text: string) => (await ui.find({ type: 'Button', key: 'sign' }))?.props.label === text
-  expect(await shown('—')).toBe(true)
+  const marks = async () => (await ui.findAll({ type: 'Text' })).filter(t => t.text?.trim() === '!').length
+  // Not named yet: a Mystic Journey, a red ! either side.
+  expect(await shown('Mystic Journey')).toBe(true)
+  expect(await marks()).toBe(2)
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'Slim-dashboard 動畫互動' } as never)
   expect(await shown('Slim-dashboard 動畫互動')).toBe(true)
+  expect(await marks()).toBe(0)
 
   await $.classic.UserPromptSubmit({ prompt: 'hi', session_title: 'renamed' } as never)
   expect(await shown('renamed')).toBe(true)
   await ui.unmount()
 })
 
-test('the sign renames the session: press, type, press again; empty, unchanged or [x] renames nothing', async ($, on) => {
+test('the sign renames the session: press, type, Enter or press again; empty, unchanged or [x] renames nothing', async ($, on) => {
   mock.store(on)
   mock.clock(on)
   const renamed: string[] = []
@@ -611,16 +641,22 @@ test('the sign renames the session: press, type, press again; empty, unchanged o
   expect(await field()).toBe(0)
   // [x] closes without renaming.
   await ui.press({ key: 'sign' })
-  await ui.input({ key: 'rename', text: 'oops' })
+  await ui.input({ key: 'rename', text: 'oops', kind: 'change' })
   await ui.press({ key: 'rename-cancel' })
   expect(await field()).toBe(0)
   expect(renamed).toEqual([])
   // Typed and pressed again: /rename, the sign follows, the old name is logged.
   await ui.press({ key: 'sign' })
-  await ui.input({ key: 'rename', text: '  new name ' })
+  await ui.input({ key: 'rename', text: '  new name ', kind: 'change' })
   await ui.press({ key: 'sign' })
   expect(renamed).toEqual(['new name'])
   expect((await ui.find({ type: 'Button', key: 'sign' }))?.props).toMatchObject({ label: 'new name' })
+  // Typed and Enter: renamed at once, the field closed.
+  await ui.press({ key: 'sign' })
+  await ui.input({ key: 'rename', text: 'by enter' })
+  expect(await field()).toBe(0)
+  expect(renamed).toEqual(['new name', 'by enter'])
+  expect((await ui.find({ type: 'Button', key: 'sign' }))?.props).toMatchObject({ label: 'by enter' })
   await ui.press({ key: 'events-toggle' })
   expect((await ui.findAll({ type: 'Text' })).some(t => t.text?.includes('Renamed: old name → new name'))).toBe(true)
   await ui.unmount()

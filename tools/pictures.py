@@ -195,7 +195,7 @@ def journal_rows():
 def skills_rows():
     return section(
         'Skill Box',
-        ('frame', [[run('Prompt for skill', MP, True)], [run('› '), run('30')]], MP),
+        ('frame', [('split', [run('Prompt for skill', MP, True)], [run('[Clear]')]), ('frame', [('split', [run('only the slow tests')], [run('x', DIM)])], MP), ('frame', [('split', [run('30')], [run('x', DIM)])], MP), [run('› ')]], MP),
         ('frame', [('split', [run('▼ General')], MOVE),
                    [run('[▼]'), run('[Unload]'), run(': compact context window', DIM)],
                    [run('[▼]'), run('[Respawn]'), run(': create new session', DIM)],

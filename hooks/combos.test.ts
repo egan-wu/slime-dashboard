@@ -132,7 +132,7 @@ test('Skill Tree builds a combo in a draft; [Save] keeps it and the Skill Box ru
   expect((await ui.find({ key: 'combo-fold' }))?.text).toBe('▾ Run-Test')
   expect(await ui.find({ key: 'wave-remove-2' })).toBeUndefined()
   expect((await ui.find({ key: 'skillcat-Party Combo' }))?.text).toBe('▼ Party Combo')
-  await ui.input({ key: 'skill-prompt', text: 'all tests', kind: 'change' })
+  await ui.input({ key: 'skill-prompt-0', text: 'all tests', kind: 'change' })
   await ui.press({ key: 'combo-Run-Test' })
   expect(sent).toHaveLength(1)
   expect(sent[0]).toContain('[Run-Test 2.1] skill /unit-test, model sonnet')
