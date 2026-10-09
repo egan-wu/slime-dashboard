@@ -163,11 +163,13 @@ const JOURNAL_KEY = 'journal'
 const WARM_LIT = { ground: '#9c5d12', text: '#ffe7b0' } as const
 // Cache Warming: on or off. On, it rests (sends nothing) once keeping
 // the cache stops paying, until the next turn starts a new idle stretch.
-const warmAutoAtom = atom({ plugin: 'slime-dashboard', key: 'warmAuto' } as const, true)
+// Off until the person turns it on: its pings spend their tokens, which no
+// one should find out about afterwards.
+const warmAutoAtom = atom({ plugin: 'slime-dashboard', key: 'warmAuto' } as const, false)
 // What a cold return still read from the cache (the system prompt and tools,
 // kept warm apart), which a rescue does not save; the last one seen.
 const WARM_SHARED_KEY = 'warmShared'
-let warmAuto = true
+let warmAuto = false
 let warmRest = false
 let warmBusy = false
 let warmShared = 0

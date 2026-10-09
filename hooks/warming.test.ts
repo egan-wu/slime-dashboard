@@ -43,11 +43,18 @@ test('Cache Warming is Auto: a fork keeps the cache warm while idle, a lapsed ca
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // A turn ends: the cache runs an hour (a subscription's TTL) from now.
   await $.turn.complete(turn(0, 150_000))
-  // Its switch, on by default; the dim word after it says `off` once it is off.
+  // Its switch, off by default (the dim word after it says `off`): off,
+  // nothing goes out, however long the cache sits.
   const off = async () => (await ui.findAll({ type: 'Text' })).some(t => t.text === 'off')
   await ui.press({ key: 'passive-toggle' })
   expect(await ui.find({ key: 'warm' })).toBeDefined()
+  expect(await off()).toBe(true)
+  await clock.advance(59 * 60_000)
+  expect(forks).toHaveLength(0)
+  // Turned on, it keeps this turn's cache from here.
+  await ui.press({ key: 'warm' })
   expect(await off()).toBe(false)
+  await $.turn.complete(turn(0, 150_000))
   // Not due yet: nothing goes out.
   await clock.advance(10 * 60_000)
   expect(forks).toHaveLength(0)

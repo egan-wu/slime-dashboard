@@ -47,15 +47,15 @@ The sign is also a button. Pressed, it opens a field under it; type a new name a
 
 ## Passive
 
-<img src="docs/passive.png" width="340" alt="Passive open: [ Cache Warming ] lit on an amber ground, 74.3k warm after it">
+<img src="docs/passive.png" width="340" alt="Passive open: [ Cache Warming ] turned on, lit on an amber ground, 74.3k warm after it">
 
-**Cache Warming** keeps the prompt cache alive while you are away. Claude Code caches the conversation for a while after each request (an hour on a Pro or Max subscription, five minutes on an API key); come back after that and the whole context is written to the cache again, at 1.25× the input price for the five-minute cache or 2× for the hour one, where reading it costs 0.1×. While the session sits idle, Cache Warming sends a one-word request forked from the conversation a little before the cache would lapse: it reads the cache, which starts its time over, and nothing joins the conversation.
+**Cache Warming** keeps the prompt cache alive while you are away. It is off until you turn it on, since its pings spend tokens of yours. Claude Code caches the conversation for a while after each request (an hour on a Pro or Max subscription, five minutes on an API key); come back after that and the whole context is written to the cache again, at 1.25× the input price for the five-minute cache or 2× for the hour one, where reading it costs 0.1×. While the session sits idle, Cache Warming sends a one-word request forked from the conversation a little before the cache would lapse: it reads the cache, which starts its time over, and nothing joins the conversation.
 
 It sends only while that pays. Each ping reads the context at 0.1×; once the pings since your last prompt would cost more than coming back to a lapsed cache, it rests until your next prompt. A 74k context is kept about seven pings; one under about 28k (little beyond the system prompt and tools, which stay cached anyway) is not kept at all. It also rests when the cache has lapsed already, the model changes, a new session starts, or HP or MP runs out. Pings count toward your usage limits like any request.
 
 | Button | What it does |
 | --- | --- |
-| `[ Cache Warming ]` | On (the default) or off, kept across sessions: lit on an amber ground while on, dim while off. The dim word after it says what it is doing: `74.3k warm` (keeping that much), `resting` (not worth it now), `waiting` (for a prompt), or `off`. |
+| `[ Cache Warming ]` | Off (the default) or on, kept across sessions: lit on an amber ground while on, dim while off. The dim word after it says what it is doing: `74.3k warm` (keeping that much), `resting` (not worth it now), `waiting` (for a prompt), or `off`. |
 
 | Warming | Resting |
 | --- | --- |
