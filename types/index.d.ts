@@ -59,6 +59,8 @@ declare module 'claude-code' {
       squadNow: number
       squadSeq: number
       squadOpen: string[]
+      squadCleared: number[]
+      squadDrafts: Record<string, string>
       treeOpen: boolean
       comboSel: string
       comboPick: number

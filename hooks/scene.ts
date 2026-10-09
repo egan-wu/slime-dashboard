@@ -4,7 +4,7 @@
 export const ROWS = 6
 const PX_H = ROWS * 2
 const GROUND_Y = PX_H - 1
-const SKY = 0x01000000
+export const SKY = 0x01000000
 
 import { DEFAULT_WEATHER } from './weather'
 import type { Weather } from './weather'
@@ -399,7 +399,7 @@ export function partyFrame(columns: number, t: number, troop = 0): PartyFrame {
 
 export const partyScrolling = (columns: number, t: number, troop = 0) => partyFrame(columns, t, troop).scrolling
 
-type Overlay = { col: number; row: number; ch: string; fg: number; bg?: number }
+export type Overlay = { col: number; row: number; ch: string; fg: number; bg?: number }
 
 // Columns of the eyes from the sleeping sprite's left edge. Each closed eye
 // is a character on a body-colored cell holding its middle row: '-' when that
@@ -1021,9 +1021,10 @@ function campfire(
   }
 }
 
-function pack(px: Uint32Array, w: number, overlays: Overlay[]): string {
-  const words = new Uint32Array(w * ROWS * 3)
-  for (let row = 0; row < ROWS; row++) {
+// `rows` cells high: the slime's world is ROWS, Dungeon's scene its own.
+export function pack(px: Uint32Array, w: number, overlays: Overlay[], rows = ROWS): string {
+  const words = new Uint32Array(w * rows * 3)
+  for (let row = 0; row < rows; row++) {
     for (let x = 0; x < w; x++) {
       const top = px[2 * row * w + x]!
       const bottom = px[(2 * row + 1) * w + x]!
@@ -1034,7 +1035,7 @@ function pack(px: Uint32Array, w: number, overlays: Overlay[]): string {
     }
   }
   for (const o of overlays) {
-    if (o.col < 0 || o.col >= w || o.row < 0 || o.row >= ROWS) continue
+    if (o.col < 0 || o.col >= w || o.row < 0 || o.row >= rows) continue
     words.set([o.ch.charCodeAt(0), o.fg, o.bg ?? SKY], (o.row * w + o.col) * 3)
   }
   return base64(new Uint8Array(words.buffer))

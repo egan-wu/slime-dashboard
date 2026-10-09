@@ -26,9 +26,19 @@ export type SquadRun = {
   result?: string
   startedAt: number
   endedAt?: number
+  // It sent work to the background this turn (a shell, a monitor): its turn's
+  // end then leaves it `awaiting` that work, still running, not done.
+  background?: boolean
+  awaiting?: boolean
+  // A question it put to the person (the ask_person tool), until answered.
+  asking?: Ask
 }
 
-export type SquadStep = { skill: string; model: ComboModel; agent: string; run?: SquadRun }
+export type Ask = { question: string; options?: string[] }
+
+// `helpers`: the subagents the step's own sent out (its skill dispatching
+// them), or that took its tag again: the same step's work.
+export type SquadStep = { skill: string; model: ComboModel; agent: string; run?: SquadRun; helpers?: SquadRun[] }
 // `n` is the wave's number in the combo, as its steps' tags count it.
 export type SquadWave = { n: number; condition?: string; steps: SquadStep[] }
 
@@ -40,20 +50,36 @@ export type Mission = {
   begunAt?: number
   endedAt?: number
   outcome?: 'done' | 'stopped' | 'error'
+  // Called back whole by the person (Dungeon's [Recall]).
+  recalled?: boolean
+  // The Skill Box's prompt it was sent with, for a run again.
+  input?: string
   waves: SquadWave[]
   others: SquadRun[]
   // The subagent leading it, when one does (else the person's own model did).
   leader?: SquadRun
 }
 
-// A press of `combo`: its waves with a step in them, none of them run yet.
-export function newMission(id: number, combo: Combo, at: number): Mission {
+// A press of `combo` (with `input`): its waves with a step in them, none of
+// them run yet.
+export function newMission(id: number, combo: Combo, at: number, input?: string): Mission {
   const waves = combo.layers.flatMap((layer, i): SquadWave[] =>
     layer.steps.length === 0
       ? []
       : [{ n: i + 1, ...(layer.condition?.trim() ? { condition: layer.condition.trim() } : {}), steps: layer.steps.map(s => ({ ...s })) }],
   )
-  return { id, combo: combo.name, sentAt: at, waves, others: [] }
+  return { id, combo: combo.name, sentAt: at, waves, others: [], ...(input?.trim() ? { input } : {}) }
+}
+
+// The combo a mission was a press of, as it stood then: its waves at their
+// numbers (the empty ones between them empty again), for a run again.
+export function missionCombo(m: Mission): Combo {
+  const last = Math.max(0, ...m.waves.map(w => w.n))
+  const layers = Array.from({ length: last }, (_, i) => {
+    const w = m.waves.find(x => x.n === i + 1)
+    return w ? { steps: w.steps.map(({ skill, model, agent }) => ({ skill, model, agent })), ...(w.condition ? { condition: w.condition } : {}) } : { steps: [] }
+  })
+  return { name: m.combo, layers }
 }
 
 export type Tag = { combo: string; mission?: number; wave: number; step: number }
@@ -116,14 +142,17 @@ function attachTo(missions: readonly Mission[], i: number, tag: Tag, run: SquadR
     const going = { ...rest, begunAt: m.begunAt ?? run.startedAt }
     const wave = m.waves.find(w => w.n === tag.wave)
     const step = wave?.steps[tag.step - 1]
-    if (!wave || !step || step.run) return { ...going, others: [...m.others, run] }
-    return { ...going, waves: m.waves.map(w => (w !== wave ? w : { ...w, steps: w.steps.map(s => (s !== step ? s : { ...s, run })) })) }
+    if (!wave || !step) return { ...going, others: [...m.others, run] }
+    const took = (s: SquadStep): SquadStep => (s.run ? { ...s, helpers: [...(s.helpers ?? []), run] } : { ...s, run })
+    return { ...going, waves: m.waves.map(w => (w !== wave ? w : { ...w, steps: w.steps.map(s => (s !== step ? s : took(s))) })) }
   })
 }
 
 // A subagent started. A leader's goes to the mission it leads, which begins.
-// A tag with a mission's number goes to that mission, and only there. A
-// subagent one of a mission's own spawned (`parent`) is among its others.
+// One a step's subagent (or its helper) spawned (`parent`) is that step's
+// helper. A tag with a mission's number goes to that mission, and only there
+// (a step already taken: its helper). A subagent one of a mission's own
+// spawned otherwise is among its others.
 // Else, a tag without a number: to the step it names in the newest live
 // mission of that combo whose step is still free (a press never seen taken up
 // begins first); else, while a mission is live, among the newest one's others.
@@ -138,6 +167,17 @@ export function attachRun(missions: readonly Mission[], run: SquadRun, parent?: 
         const { endedAt: _, outcome: __, ...rest } = m
         return { ...rest, begunAt: m.begunAt ?? run.startedAt, leader: run }
       })
+    }
+  }
+  if (parent !== undefined) {
+    for (let i = 0; i < missions.length; i++) {
+      const m = missions[i]!
+      const step = m.waves.flatMap(w => w.steps).find(s => [...(s.run ? [s.run] : []), ...(s.helpers ?? [])].some(r => r.id === parent))
+      if (!step) continue
+      const { endedAt: _, outcome: __, ...rest } = m
+      return missions.map((x, k) =>
+        k !== i ? x : { ...rest, waves: m.waves.map(w => ({ ...w, steps: w.steps.map(s => (s !== step ? s : { ...s, helpers: [...(s.helpers ?? []), run] })) })) },
+      )
     }
   }
   const tag = tagOf(run.description)
@@ -181,18 +221,43 @@ export function updateRun(missions: readonly Mission[], id: string, fn: (r: Squa
     found = true
     return fn(r)
   }
-  const next = missions.map(m => ({
-    ...m,
-    waves: m.waves.map(w => ({ ...w, steps: w.steps.map(s => (s.run ? { ...s, run: edit(s.run) } : s)) })),
-    others: m.others.map(edit),
-    ...(m.leader ? { leader: edit(m.leader) } : {}),
-  }))
+  const next = missions.map(m => mapRuns(m, edit))
   return found ? next : undefined
 }
 
-// Every run in the missions: leaders, steps and others alike.
+// Every run in the missions: leaders, steps, their helpers and others alike.
 export const runsOf = (missions: readonly Mission[]): SquadRun[] =>
-  missions.flatMap(m => [...(m.leader ? [m.leader] : []), ...m.waves.flatMap(w => w.steps.flatMap(s => (s.run ? [s.run] : []))), ...m.others])
+  missions.flatMap(m => [...(m.leader ? [m.leader] : []), ...m.waves.flatMap(w => w.steps.flatMap(stepRuns)), ...m.others])
+
+// A step's runs: its own subagent's, then its helpers'.
+export const stepRuns = (s: SquadStep): SquadRun[] => [...(s.run ? [s.run] : []), ...(s.helpers ?? [])]
+
+// How a step stands: running while its subagent or any helper it sent out
+// still runs (or awaits its background work); else as its own subagent ended.
+// Undefined until a subagent took it.
+export function stepStatus(s: SquadStep): RunStatus | undefined {
+  if (!s.run) return undefined
+  return stepRuns(s).some(r => r.status === 'running') ? 'running' : s.run.status
+}
+
+// The run of a step (or any run) that waits on the person's answer.
+export const askingRun = (runs: readonly SquadRun[]): SquadRun | undefined => runs.find(r => r.asking !== undefined && r.status === 'running')
+
+export type MissionState = 'queued' | 'running' | 'asking' | 'done' | 'stopped' | 'recalled' | 'error'
+
+// How a mission stands, as its folded card says it.
+export function missionState(m: Mission): MissionState {
+  if (m.endedAt !== undefined) return m.recalled ? 'recalled' : (m.outcome ?? 'done')
+  if (askingRun(runsOf([m]))) return 'asking'
+  return m.begunAt === undefined ? 'queued' : 'running'
+}
+
+// The missions cleared (ended done) this session, by number: `cleared` with
+// any newly done added; undefined when none is new.
+export function clearedOf(missions: readonly Mission[], cleared: readonly number[]): number[] | undefined {
+  const fresh = missions.filter(m => m.endedAt !== undefined && m.outcome === 'done' && !cleared.includes(m.id)).map(m => m.id)
+  return fresh.length > 0 ? [...cleared, ...fresh] : undefined
+}
 
 // The agents a mission's subagents spawned that Dungeon has not seen start
 // (`agents` as the engine lists them), and the model each runs on as far as
@@ -204,7 +269,8 @@ export function agentsToFollow(missions: readonly Mission[], agents: readonly { 
     const tag = tagOf(a.description)
     const m = missions.find(x => runsOf([x]).some(r => r.id === a.parentId))
     const step = tag && m?.combo === tag.combo ? m.waves.find(w => w.n === tag.wave)?.steps[tag.step - 1] : undefined
-    return [{ id: a.id, description: a.description, parentId: a.parentId, model: step?.model ?? fallback }]
+    const parent = step ? undefined : runsOf(missions).find(r => r.id === a.parentId)
+    return [{ id: a.id, description: a.description, parentId: a.parentId, model: step?.model ?? (parent && !leaderOf(parent.description) ? parent.model : undefined) ?? fallback }]
   })
 }
 
@@ -214,8 +280,8 @@ export function agentsToFollow(missions: readonly Mission[], agents: readonly { 
 // background ends its turn as it sends them, and is woken by their reports.
 export function endLed(missions: readonly Mission[], id: string, outcome: Mission['outcome'], at: number, busy = false): Mission[] | undefined {
   const m = missions.find(x => x.leader?.id === id)
-  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running')) return undefined
-  return missions.map(x => (x === m ? { ...x, endedAt: at, outcome } : x))
+  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running' && !r.awaiting)) return undefined
+  return missions.map(x => (x === m ? settled({ ...x, endedAt: at, outcome }, at) : x))
 }
 
 // Missions whose leader has ended its turn and that nothing else of runs any
@@ -223,10 +289,26 @@ export function endLed(missions: readonly Mission[], id: string, outcome: Missio
 // own helper) ended after the leader's last turn.
 export function settleLed(missions: readonly Mission[], at: number): Mission[] | undefined {
   const due = (m: Mission) =>
-    m.leader !== undefined && m.endedAt === undefined && m.leader.status !== 'running' && !runsOf([m]).some(r => r.status === 'running')
+    m.leader !== undefined && m.endedAt === undefined && m.leader.status !== 'running' && !runsOf([m]).some(r => r.status === 'running' && !r.awaiting)
   if (!missions.some(due)) return undefined
   const outcome = (r: SquadRun): Mission['outcome'] => (r.status === 'completed' ? 'done' : r.status === 'stopped' ? 'stopped' : 'error')
-  return missions.map(m => (due(m) ? { ...m, endedAt: at, outcome: outcome(m.leader!) } : m))
+  return missions.map(m => (due(m) ? settled({ ...m, endedAt: at, outcome: outcome(m.leader!) }, at) : m))
+}
+
+// A mission that ended: a run still awaiting its background work is done
+// with it (its leader had its report and went on).
+const settled = (m: Mission, at: number): Mission =>
+  mapRuns(m, r => (r.awaiting && r.status === 'running' ? { ...r, status: 'completed', awaiting: false, endedAt: r.endedAt ?? at } : r))
+
+// Each run of a mission (its leader's, its steps', their helpers', its
+// others') through `fn`.
+export function mapRuns(m: Mission, fn: (r: SquadRun) => SquadRun): Mission {
+  return {
+    ...m,
+    waves: m.waves.map(w => ({ ...w, steps: w.steps.map(s => ({ ...s, ...(s.run ? { run: fn(s.run) } : {}), ...(s.helpers ? { helpers: s.helpers.map(fn) } : {}) })) })),
+    others: m.others.map(fn),
+    ...(m.leader ? { leader: fn(m.leader) } : {}),
+  }
 }
 
 // The subagent under `id` is at work again (a leader woken by its steps'
@@ -235,23 +317,15 @@ export function reviveRun(missions: readonly Mission[], id: string): Mission[] |
   const i = missions.findIndex(m => runsOf([m]).some(r => r.id === id))
   if (i < 0) return undefined
   const m = missions[i]!
-  if (m.endedAt === undefined && runsOf([m]).find(r => r.id === id)?.status === 'running') return undefined
+  const r = runsOf([m]).find(x => x.id === id)
+  if (m.endedAt === undefined && r?.status === 'running' && !r.awaiting) return undefined
   const { endedAt: _, outcome: __, ...rest } = m
   const back = (r: SquadRun): SquadRun => {
     if (r.id !== id) return r
-    const { endedAt: _e, ...live } = r
+    const { endedAt: _e, awaiting: _a, ...live } = r
     return { ...live, status: 'running' }
   }
-  return missions.map((x, k) =>
-    k !== i
-      ? x
-      : {
-          ...rest,
-          waves: m.waves.map(w => ({ ...w, steps: w.steps.map(st => (st.run ? { ...st, run: back(st.run) } : st)) })),
-          others: m.others.map(back),
-          ...(m.leader ? { leader: back(m.leader) } : {}),
-        },
-  )
+  return missions.map((x, k) => (k !== i ? x : mapRuns(rest as Mission, back)))
 }
 
 // Whether Dungeon should still look for subagents in the engine's list: a

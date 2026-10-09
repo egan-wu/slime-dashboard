@@ -10,10 +10,11 @@ import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, clockText, compact, N
 import type { CacheTtl, Tally } from './props'
 import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
-import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
+import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, attachRun, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
-import type { Mission, RunStatus, SquadRun } from './squad'
+import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
+import type { Mission, MissionState, RunStatus, SquadRun } from './squad'
+import { DUNGEON_ROWS, dungeonFrame } from './dungeon'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
 import { faceOf, filledOf, FULL, isDown, vitalsOf } from './vitals'
@@ -102,6 +103,20 @@ const COIN = { color: '#ffd23f', frames: ['●', '◐', '○', '◑'], ms: 250 }
 
 // A leader, while its mission goes on (between its turns as well).
 const LEADING_LOOK = { mark: '◆', word: 'leading', color: '#c77dff' }
+// A leader whose mission the person called back with [Recall].
+const RECALLED_LOOK = { mark: '■', word: 'recalled', color: hex(STOP_RED) }
+// A subagent waiting on the person's answer.
+const ASKING_LOOK = { mark: '?', word: 'asking', color: '#4cc9f0' }
+// How a mission stands, on its card's banner (folded or not).
+const MISSION_LOOK: Record<MissionState, { mark: string; word: string; color?: string }> = {
+  queued: RUN_LOOK.waiting,
+  running: RUN_LOOK.running,
+  asking: ASKING_LOOK,
+  done: RUN_LOOK.completed,
+  stopped: RUN_LOOK.stopped,
+  recalled: RECALLED_LOOK,
+  error: { ...RUN_LOOK.failed, word: 'error' },
+}
 // A step's model as Dungeon names it: `sonnet` to `Sonnet`.
 const modelName = (m: string) => m.charAt(0).toUpperCase() + m.slice(1)
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
@@ -285,17 +300,26 @@ const squadSeqAtom = atom({ plugin: 'slime-dashboard', key: 'squadSeq' } as cons
 const squadNowAtom = atom({ plugin: 'slime-dashboard', key: 'squadNow' } as const, 0)
 // The step cards opened in Dungeon (each closed until pressed), by key.
 const squadOpenAtom = atom({ plugin: 'slime-dashboard', key: 'squadOpen' } as const, [] as string[])
+// The missions cleared (ended done) this session, by number: the board's
+// count, kept when their cards are taken off.
+const squadClearedAtom = atom({ plugin: 'slime-dashboard', key: 'squadCleared' } as const, [] as number[])
+// What the person has typed so far to answer a subagent's question, by its id.
+const squadDraftsAtom = atom({ plugin: 'slime-dashboard', key: 'squadDrafts' } as const, {} as Record<string, string>)
 
 // A change to the missions; one that finds nothing to change keeps them.
 async function setSquad($: EngineInterface, fn: (missions: Mission[]) => Mission[] | undefined) {
   await update($, squadAtom, missions => fn(missions) ?? missions)
+  const cleared = clearedOf(await read($, squadAtom), await read($, squadClearedAtom))
+  if (cleared) await update($, squadClearedAtom, () => cleared)
   await retitleSquad($).catch(() => {})
 }
 
-// Dungeon's tab counts the missions not yet ended: `Dungeon (2)`.
+// Dungeon's tab counts the missions not yet ended: `Dungeon (2)`; and
+// says so when one of them asks the person something: `Dungeon (2) ?`.
 const squadTitle = (missions: readonly Mission[]) => {
-  const going = missions.filter(m => m.endedAt === undefined).length
-  return going > 0 ? `${SQUAD_TITLE} (${going})` : SQUAD_TITLE
+  const going = missions.filter(m => m.endedAt === undefined)
+  const asks = going.some(m => missionState(m) === 'asking') ? ' ?' : ''
+  return going.length > 0 ? `${SQUAD_TITLE} (${going.length})${asks}` : SQUAD_TITLE
 }
 let shownSquadTitle: string | undefined
 
@@ -323,9 +347,11 @@ async function checkSquad($: EngineInterface) {
   // The subagents a leader (or a step) spawns run under this plugin's own
   // spawn, whose agent.spawn hooks skip this one: the agent list names them.
   for (const a of agentsToFollow(missions, agents, LEADER_MODEL)) await started($, a.id, a.model, a.description, a.parentId)
+  // A run awaiting its background work has ended its turn: the list says so,
+  // but it goes on until that work is done (or its mission ends).
   for (const r of running) {
     const status = statusOfAgent(agents.find(a => a.id === r.id)?.status ?? '')
-    if (!status) continue
+    if (!status || (r.awaiting && status === 'completed')) continue
     await editRun($, r.id, x => ({ ...x, status, endedAt: x.endedAt ?? at }))
     // A leader's end is its mission's, once nothing it sent out still runs.
     const busy = agents.some(a => a.parentId === r.id && !statusOfAgent(a.status))
@@ -333,7 +359,7 @@ async function checkSquad($: EngineInterface) {
   }
   // A run the engine no longer lists has long ended, its end unseen.
   for (const r of running) {
-    if (!agents.some(a => a.id === r.id) && at - r.startedAt > GONE_MS) await editRun($, r.id, x => (x.status === 'running' ? { ...x, status: 'completed', endedAt: x.endedAt ?? at } : x))
+    if (!r.awaiting && !agents.some(a => a.id === r.id) && at - r.startedAt > GONE_MS) await editRun($, r.id, x => (x.status === 'running' ? { ...x, status: 'completed', endedAt: x.endedAt ?? at } : x))
   }
   // A mission whose leader ended before what it waited on did ends now.
   await setSquad($, missions => settleLed(missions, at))
@@ -791,10 +817,14 @@ async function stopMinion($: EngineInterface, id: string) {
   await checkMinions($).catch(() => {})
 }
 
-// Dungeon's [X] on a step's card: that subagent is called back (TaskStop, as
-// Party's [x]); its leader hears it was stopped.
-async function recallRun($: EngineInterface, id: string) {
-  await stopMinion($, id)
+// Dungeon's [X] on a step's card: that subagent, and the helpers it sent out
+// that still run, are called back (TaskStop, as Party's [x]); its leader hears
+// it was stopped. A question one of them put to the person goes unanswered.
+async function recallRuns($: EngineInterface, ids: readonly string[]) {
+  for (const id of ids) answerAsk(id, ASK_STOPPED)
+  for (const id of ids) await stopMinion($, id)
+  const at = await $.clock.now()
+  for (const id of ids) await editRun($, id, r => (r.status === 'running' ? { ...r, status: 'stopped', endedAt: at, awaiting: false } : r))
   await checkSquad($).catch(() => {})
 }
 
@@ -815,22 +845,63 @@ async function recallMission($: EngineInterface, missionId: number) {
     return status === undefined ? runsOf([mission]).some(r => r.id === id && r.status === 'running') : !statusOfAgent(status)
   }
   const order = [...(mission.leader ? [mission.leader.id] : []), ...[...mine].filter(id => id !== mission.leader?.id)]
+  for (const id of mine) answerAsk(id, ASK_STOPPED)
   for (const id of order) if (live(id)) await stopMinion($, id)
   const at = await $.clock.now()
-  await setSquad($, missions =>
-    missions.map(m => {
-      if (m.id !== missionId) return m
-      const stop = (r: SquadRun): SquadRun => (r.status === 'running' ? { ...r, status: 'stopped', endedAt: at } : r)
-      return {
-        ...m,
-        waves: m.waves.map(w => ({ ...w, steps: w.steps.map(st => (st.run ? { ...st, run: stop(st.run) } : st)) })),
-        others: m.others.map(stop),
-        ...(m.leader ? { leader: stop(m.leader) } : {}),
-        endedAt: m.endedAt ?? at,
-        outcome: 'stopped',
-      }
-    }),
-  )
+  const stop = (r: SquadRun): SquadRun => (r.status === 'running' ? { ...r, status: 'stopped', endedAt: at, awaiting: false } : r)
+  await setSquad($, missions => missions.map(m => (m.id !== missionId ? m : { ...mapRuns(m, stop), endedAt: m.endedAt ?? at, outcome: 'stopped', recalled: true })))
+}
+
+// An ended mission's [↻]: its combo, as it was pressed, runs again with the
+// same prompt, as a mission of its own (this one stays as it is).
+async function rerunMission($: EngineInterface, missionId: number) {
+  const m = (await read($, squadAtom)).find(x => x.id === missionId)
+  if (m && m.endedAt !== undefined) await runCombo($, missionCombo(m), { input: m.input ?? '' })
+}
+
+// Missions taken off Dungeon (its [x], [Clear All]): a question one of their
+// subagents still waits on is let go unanswered.
+async function dropMissions($: EngineInterface, keep: (m: Mission) => boolean) {
+  for (const m of await read($, squadAtom)) if (!keep(m)) for (const r of runsOf([m])) answerAsk(r.id, ASK_DROPPED)
+  await setSquad($, missions => missions.filter(keep))
+}
+
+// A combo's subagent asking the person (ASK_TOOL): its question shows on its
+// card in Dungeon, which opens on it, and the call waits there for the answer.
+const asks = new Map<string, { answer?: string }>()
+// How long a question waits for the person before the subagent goes on alone.
+const ASK_WAIT_MS = 30 * 60_000
+const ASK_STOPPED = 'The person stopped you before answering. Stop here.'
+const ASK_DROPPED = 'The person did not answer. Go on with your best judgment, and say what you assumed.'
+const ASK_TIMEOUT = 'The person did not answer in time. Go on with your best judgment, and say what you assumed.'
+
+// The person's answer to the question `id` asked; nothing when none waits.
+function answerAsk(id: string, answer: string) {
+  const pending = asks.get(id)
+  if (pending && pending.answer === undefined) pending.answer = answer
+}
+
+async function sendAnswer($: EngineInterface, id: string, answer: string) {
+  const text = answer.trim()
+  if (!text) return
+  answerAsk(id, text)
+  await update($, squadDraftsAtom, ({ [id]: _, ...rest }) => rest)
+}
+
+// The cards a run's question shows on, opened: its mission, its waves, and
+// its step's (or other's) card.
+function askKeys(missions: readonly Mission[], id: string): string[] {
+  for (const m of missions) {
+    const base = [`mission-${m.id}-fold`]
+    if (m.leader?.id === id) return base
+    for (const w of m.waves) {
+      const si = w.steps.findIndex(st => stepRuns(st).some(r => r.id === id))
+      if (si >= 0) return [...base, `mission-${m.id}-waves`, `mission-${m.id}-${w.n}-${si}`]
+    }
+    const oi = m.others.findIndex(r => r.id === id)
+    if (oi >= 0) return [...base, `mission-${m.id}-waves`, `mission-${m.id}-o${oi}`]
+  }
+  return []
 }
 
 // The chest is behind them and the little one has merged: it is gone.
@@ -1170,8 +1241,10 @@ async function started($: EngineInterface, id: string, model: string, descriptio
 // Skill Box's prompt as its input, so the person's conversation goes on
 // untouched; the pieces then clear. Where no subagent can be started, the main
 // model is asked to lead it instead.
-async function runCombo($: EngineInterface, combo: Combo) {
-  const input = await skillInput($)
+// `again`: a mission run once more, with the prompt it was sent with (the
+// Skill Box's pieces are left as they are).
+async function runCombo($: EngineInterface, combo: Combo, again?: { input: string }) {
+  const input = again ? again.input : await skillInput($)
   // Its mission's number, in the prompt and in each step's tag.
   const id = nextMissionId(await read($, squadAtom), await read($, squadSeqAtom))
   const text = comboPrompt(combo, input, id, true)
@@ -1179,13 +1252,13 @@ async function runCombo($: EngineInterface, combo: Combo) {
     $.ui.toast(`Party Combo: ${combo.name} has no skill yet`)
     return
   }
-  $.ui.toast(`Party Combo: sending ${combo.name}`)
+  $.ui.toast(`Party Combo: sending ${combo.name}${again ? ' again' : ''}`)
   try {
     await update($, squadSeqAtom, () => id)
     // A mission for Dungeon, which opens on it; its leader, once started,
     // begins it.
     const at = await $.clock.now()
-    await setSquad($, missions => [...missions, newMission(id, combo, at)])
+    await setSquad($, missions => [...missions, newMission(id, combo, at, input)])
     // This plugin's own spawn runs every agent.spawn hook but its own: the
     // leader is put on its mission here.
     const description = `${leaderTag(combo.name, id)} the Party Combo`
@@ -1196,8 +1269,8 @@ async function runCombo($: EngineInterface, combo: Combo) {
       if (leader !== undefined) await started($, leader, led.model, description)
       else await setSquad($, missions => beginMission(missions, combo.name, at, id))
     } else await $.prompt.submit({ text: comboPrompt(combo, input, id)! })
-    await clearSkillInput($)
-    await logEvent($, `Combo sent: ${combo.name}`)
+    if (!again) await clearSkillInput($)
+    await logEvent($, `Combo sent${again ? ' again' : ''}: ${combo.name}`)
     await openSquad($).catch(() => undefined)
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
@@ -1334,6 +1407,20 @@ export const register: Register = on => {
       description: 'Open the slime dashboard pane, or manage its Skill Box',
       argumentHint: '[add <skill> [--category <name>] [--desc <words>] | remove <skill> | list | weather | dungeon]',
     })
+    // What a Party Combo's subagents ask the person with: Dungeon shows it.
+    await $.tool.register({
+      name: ASK_TOOL_NAME,
+      description:
+        'Ask the person a question and wait for their answer: use it when your task needs them to decide or tell you something you should not guess. The question shows in their dashboard, where they type the answer or pick one of the options.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: 'The question, complete and on its own.' },
+          options: { type: 'array', items: { type: 'string' }, description: 'Up to four answers to pick from, when there are a few likely ones.' },
+        },
+        required: ['question'],
+      },
+    }).catch(() => {})
     const colors = colorsFrom(await $.store.get(COLORS_KEY))
     setColors(colors)
     await update($, colorsAtom, () => colors)
@@ -1532,9 +1619,56 @@ export const register: Register = on => {
     return result
   })
 
+  // A combo's subagent asks the person: the question shows on its card, and
+  // the call waits for the answer typed or picked there. The wait is spent in
+  // the engine (a one-second `sleep` at a time), not out of the hook's budget.
+  on('tool.call', { tool: ASK_TOOL }, async ($, e, next) => {
+    const input = e as unknown as { question?: unknown; options?: unknown }
+    const question = typeof input.question === 'string' ? input.question.trim() : ''
+    if (!question) return { deny: 'Give the question to ask the person.' }
+    const options = (Array.isArray(input.options) ? input.options : []).filter((o): o is string => typeof o === 'string' && o.trim() !== '').slice(0, 4)
+    const id = e.agentId
+    // Not a combo's: the engine's own question dialog asks instead.
+    if (id === undefined || !runsOf(await read($, squadAtom)).some(r => r.id === id)) {
+      return { result: await $.ui.ask(question, options.length >= 2 ? options : undefined).catch(() => ASK_DROPPED) }
+    }
+    const pending: { answer?: string } = {}
+    asks.set(id, pending)
+    try {
+      await editRun($, id, r => ({ ...r, asking: { question, ...(options.length > 0 ? { options } : {}) } }))
+      const keys = askKeys(await read($, squadAtom), id)
+      await update($, squadOpenAtom, l => [...l, ...keys.filter(k => !l.includes(k))])
+      await openSquad($).catch(() => undefined)
+      $.ui.toast(`Dungeon: a subagent asks you something`)
+      await logEvent($, `? Asked: ${question}`)
+      const until = (await $.clock.now()) + ASK_WAIT_MS
+      while (pending.answer === undefined) {
+        if (next.signal.aborted) return { result: ASK_STOPPED }
+        if ((await $.clock.now()) > until) pending.answer = ASK_TIMEOUT
+        else await $.process.run(['sleep', '1'], { timeoutMs: 5_000 })
+      }
+      return { result: pending.answer }
+    } catch {
+      // No way to wait here (no `sleep`): the engine's own dialog asks.
+      return { result: pending.answer ?? (await $.ui.ask(question, options.length >= 2 ? options : undefined).catch(() => ASK_DROPPED)) }
+    } finally {
+      asks.delete(id)
+      await editRun($, id, ({ asking: _, ...r }) => r).catch(() => {})
+      await update($, squadDraftsAtom, ({ [id]: _, ...rest }) => rest).catch(() => {})
+    }
+  }).catch(($, e, next) => {
+    // The hook itself failed (threw, outran its budget): say why in the
+    // answer, rather than leave the call to fail unanswered.
+    if (next.error.kind === 're-entry') return next(e)
+    return { result: `The question could not be put to the person (${next.error.kind}: ${next.error.message ?? 'no reason given'}). Go on with your best judgment, and say what you assumed.` }
+  })
+
   // A question put to the person, or a plan to approve: waiting until answered.
   on('tool.call', async ($, e, next) => {
-    if (e.agentId !== undefined) await editRun($, e.agentId, r => ({ ...r, tool: String(e.tool) })).catch(() => {})
+    // A subagent's tool, and whether it sent work to the background (a
+    // subagent it sends is followed on its own).
+    const bg = e.tool !== 'Agent' && (e as unknown as { run_in_background?: unknown }).run_in_background === true
+    if (e.agentId !== undefined) await editRun($, e.agentId, r => ({ ...r, tool: String(e.tool), ...(bg ? { background: true } : {}) })).catch(() => {})
     const asks = ASKING_TOOLS.has(String(e.tool))
     if (asks) await setWaiting($, true).catch(() => {})
     const ran = await next(e)
@@ -1571,7 +1705,12 @@ export const register: Register = on => {
       if (e.agentId !== undefined) {
         const status: RunStatus = e.reason === 'answer' ? 'completed' : e.reason === 'aborted' ? 'stopped' : 'failed'
         const spent = e.usage ? usageTokens(e.usage) : 0
-        await editRun($, e.agentId, r => ({ ...r, status, endedAt: at, ...(answer?.trim() ? { result: answer.trim() } : {}), ...(spent ? { turnTokens: (r.turnTokens ?? 0) + spent } : {}) })).catch(() => {})
+        await editRun($, e.agentId, r => {
+          const said = { ...(answer?.trim() ? { result: answer.trim() } : {}), ...(spent ? { turnTokens: (r.turnTokens ?? 0) + spent } : {}) }
+          // A step whose turn ended with work in the background awaits it, still running.
+          if (status === 'completed' && r.background && !leaderOf(r.description)) return { ...r, ...said, background: false, awaiting: true, tool: 'background work' }
+          return { ...r, ...said, status, endedAt: at, background: false, awaiting: false }
+        }).catch(() => {})
         // A leader's end is its mission's, once nothing it sent out still runs.
         const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
         const agents = await $.agent.list().catch(() => [])
@@ -2585,49 +2724,89 @@ export const register: Register = on => {
   // subagent that took it: how it stands, its model and type, how far it has
   // got, and the start of its answer.
   on('ui.render', { component: 'Pane', requestId: SQUAD }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const table = $.ui.resolve(e)
+    const { Box, Button, Text } = table
+    const Input = 'Input' in table ? table.Input : undefined
     const missions = await read($, squadAtom)
     const open = await read($, squadOpenAtom)
+    const cleared = await read($, squadClearedAtom)
+    const drafts = await read($, squadDraftsAtom)
     await read($, squadNowAtom)
     const now = await $.clock.now()
     const paneColumns = e.surface === 'terminal' ? Math.max(12, Math.min(512, e.props.bodyColumns)) : OPEN.columns
     const outer = Math.max(8, paneColumns - 1)
-    if (missions.length === 0) {
-      return (
-        <Box flexDirection="column" width={outer}>
-          <Text dimColor wrap="wrap">
-            No Party Combo sent yet. Press one in the Skill Box: each of its subagents shows here as it runs.
-          </Text>
-        </Box>
-      )
+    const toggle = (key: string) => update($, squadOpenAtom, l => (l.includes(key) ? l.filter(k => k !== key) : [...l, key]))
+
+    // The scene over it all: the cleared board, the slime, the gate, and the
+    // fight while missions go on.
+    const going = missions.filter(m => m.endedAt === undefined).length
+    let scene: JSX.Element | null = null
+    if (e.surface === 'terminal') {
+      const { Raster } = $.ui.resolve(e)
+      scene = <Raster key="dungeon-scene" columns={outer} rows={DUNGEON_ROWS} cells={dungeonFrame(outer, tick, model, going, cleared.length)} />
     }
 
+    // A question a subagent waits on the person for: the question, its
+    // options to pick, and a field to type the answer in.
+    const askBlock = (key: string, run: SquadRun) =>
+      run.asking && (
+        <Box key={`${key}-ask`} flexDirection="column">
+          <Text color={ASKING_LOOK.color} wrap="wrap">{`  ? ${run.asking.question}`}</Text>
+          {(run.asking.options ?? []).map((o, i) => (
+            <Box key={`${key}-ask-o${i}`} flexDirection="row">
+              <Text>{'    ['}</Text>
+              <Button key={`${key}-ask-${i}`} label={`${i + 1}`} plain hover={{ scope: `${key}-ask-${i}`, color: ASKING_LOOK.color, bold: true }} onPress={() => sendAnswer($, run.id, o)} />
+              <Text wrap="truncate-end">{`] ${o}`}</Text>
+            </Box>
+          ))}
+          {Input && (
+            <Input
+              key={`${key}-ask-input`}
+              label="  ›"
+              placeholder="your answer, then Enter"
+              submitLabel="send"
+              value={drafts[run.id] ?? ''}
+              onInput={(value: string) => update($, squadDraftsAtom, d => ({ ...d, [run.id]: value }))}
+              onSubmit={(value: string) => sendAnswer($, run.id, value)}
+            />
+          )}
+        </Box>
+      )
+
     // A step's card: its mark and skill, and how it stands; opened (▸ / ▾),
-    // its model and type, what it is doing, and its answer. A leader's card is
-    // always open, and leading while its mission goes on.
-    const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number, leads = false, missionId?: number) => {
+    // its model and type, what it is doing, the helpers it sent out, and its
+    // answer. A leader's card is always open, and leading while its mission
+    // goes on. A question it (or a helper) asks shows on it, open.
+    const runBlock = (
+      key: string,
+      title: string,
+      model: string,
+      agent: string,
+      run: SquadRun | undefined,
+      ended: boolean,
+      width: number,
+      { leads = false, missionId, helpers = [], recalled = false }: { leads?: boolean; missionId?: number; helpers?: readonly SquadRun[]; recalled?: boolean } = {},
+    ) => {
       const leading = leads && !ended && run !== undefined
-      const look = leading ? LEADING_LOOK : run ? RUN_LOOK[run.status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
+      const asker = askingRun([...(run ? [run] : []), ...helpers])
+      const status = run && (helpers.some(x => x.status === 'running') ? 'running' : run.status)
+      const look = asker ? ASKING_LOOK : leading ? LEADING_LOOK : leads && recalled ? RECALLED_LOOK : status ? RUN_LOOK[status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
       // A leader's tokens are its mission's coin's, not its card's.
-      const tokens = run && !leads && runTokens(run) ? tokensText(runTokens(run)) : ''
+      const spent = [run, ...helpers].reduce((n, r) => n + (r ? runTokens(r) : 0), 0)
+      const tokens = run && !leads && spent ? tokensText(spent) : ''
       const doing = !run
         ? ''
-        : run.status === 'running'
-          ? [`step ${run.steps}`, run.tool, elapsed(now - run.startedAt), tokens].filter(Boolean).join(' · ')
+        : status === 'running'
+          ? [run.status === 'running' && !run.awaiting ? `step ${run.steps}` : '', run.tool, elapsed(now - run.startedAt), tokens].filter(Boolean).join(' · ')
           : [elapsed((leading ? now : (run.endedAt ?? now)) - run.startedAt), tokens].filter(Boolean).join(' · ')
       const isOpen = leads || open.includes(key)
+      // Running, the step (and what it sent out) can be called back.
+      const live = [run, ...helpers].filter((r): r is SquadRun => r !== undefined && r.status === 'running').map(r => r.id)
       return (
         <Box key={key} flexDirection="column" borderStyle="round" borderColor={look.color ?? BORDER_DIM} paddingX={1} width={width}>
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" flexShrink={1} minWidth={0}>
-              {!leads && (
-                <Button
-                  key={`${key}-fold`}
-                  label={isOpen ? '▾' : '▸'}
-                  plain
-                  onPress={() => update($, squadOpenAtom, l => (l.includes(key) ? l.filter(k => k !== key) : [...l, key]))}
-                />
-              )}
+              {!leads && <Button key={`${key}-fold`} label={isOpen ? '▾' : '▸'} plain onPress={() => toggle(key)} />}
               <Text color={look.color} dimColor={look.color === undefined}>{`${leads ? '' : ' '}${look.mark} `}</Text>
               <Text bold wrap="truncate-end">{title}</Text>
             </Box>
@@ -2642,10 +2821,10 @@ export const register: Register = on => {
                   <Text dimColor>]</Text>
                 </Box>
               )}
-              {!leads && run?.status === 'running' && (
+              {!leads && live.length > 0 && (
                 <Box flexDirection="row">
                   <Text dimColor>{' ['}</Text>
-                  <Button key={`${key}-stop`} label="X" plain hover={{ scope: `${key}-stop`, color: hex(STOP_RED), bold: true }} onPress={() => recallRun($, run.id)} />
+                  <Button key={`${key}-stop`} label="X" plain hover={{ scope: `${key}-stop`, color: hex(STOP_RED), bold: true }} onPress={() => recallRuns($, live)} />
                   <Text dimColor>]</Text>
                 </Box>
               )}
@@ -2657,6 +2836,22 @@ export const register: Register = on => {
               {doing !== '' && <Text dimColor>{` ${doing}`}</Text>}
             </Box>
           )}
+          {/* What the step's subagent sent out: a line each. */}
+          {isOpen &&
+            helpers.map((hr, i) => {
+              const hl = hr.asking ? ASKING_LOOK : RUN_LOOK[hr.status]
+              return (
+                <Box key={`${key}-h${i}`} flexDirection="row" justifyContent="space-between">
+                  <Box flexDirection="row" flexShrink={1} minWidth={0}>
+                    <Text dimColor>{'  ↳ '}</Text>
+                    <Text color={hl.color} dimColor={hl.color === undefined}>{`${hl.mark} `}</Text>
+                    <Text wrap="truncate-end">{cleanSummary(hr.description || 'subagent')}</Text>
+                  </Box>
+                  <Text dimColor>{` ${[hr.model ? modelInfo(hr.model).name : '', elapsed((hr.status === 'running' ? now : (hr.endedAt ?? now)) - hr.startedAt)].filter(Boolean).join(' · ')}`}</Text>
+                </Box>
+              )
+            })}
+          {isOpen && asker && askBlock(key, asker)}
           {isOpen &&
             run?.result &&
             resultLines(run.result, 3).map((line, i) => (
@@ -2670,6 +2865,7 @@ export const register: Register = on => {
       const ended = m.endedAt !== undefined
       const took = m.begunAt !== undefined && ended ? elapsed(m.endedAt! - m.begunAt) : ''
       const spent = tokensOf([m])
+      const state = MISSION_LOOK[missionState(m)]
       // The combo's name opens the mission from its first two lines (closed
       // until pressed), and folds it again.
       const foldKey = `mission-${m.id}-fold`
@@ -2677,7 +2873,7 @@ export const register: Register = on => {
       const wavesKey = `mission-${m.id}-waves`
       const wavesOpen = open.includes(wavesKey)
       const steps = m.waves.flatMap(w => w.steps)
-      const count = (st: RunStatus) => steps.filter(x => x.run?.status === st).length
+      const count = (st: RunStatus) => steps.filter(x => stepStatus(x) === st).length
       const progress = [
         `${m.waves.length} wave${m.waves.length === 1 ? '' : 's'}`,
         `${count('completed')}/${steps.length} done`,
@@ -2693,27 +2889,31 @@ export const register: Register = on => {
       const inner = outer - 4
       return (
         <Box key={`mission-${m.id}`} flexDirection="column" borderStyle="round" borderColor={COMBO.banner} paddingX={1} width={outer}>
-          {/* The combo's name, [x] at the right taking the mission off the
-              tab; under it its number (as its tags carry it), when it was
-              sent, how it stands, how long, and its subagents' tokens. */}
+          {/* The combo's name, how it stands and [x] at the right taking the
+              mission off the tab; under it its number (as its tags carry it),
+              when it was sent (folded: how far its steps got), and its
+              subagents' tokens. */}
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" backgroundColor={COMBO.banner} paddingX={1} flexShrink={1} minWidth={0}>
-              <Button
-                key={foldKey}
-                label={`${folded ? '▸' : '▾'} ${m.combo}`}
-                plain
-                hover={{ scope: foldKey, color: COMBO.text, bold: true }}
-                onPress={() => update($, squadOpenAtom, l => (l.includes(foldKey) ? l.filter(k => k !== foldKey) : [...l, foldKey]))}
-              />
+              <Button key={foldKey} label={`${folded ? '▸' : '▾'} ${m.combo}`} plain hover={{ scope: foldKey, color: COMBO.text, bold: true }} onPress={() => toggle(foldKey)} />
             </Box>
             <Box flexDirection="row" flexShrink={0}>
-              <Text color={hex(STOP_RED)}>[</Text>
-              <Button key={`mission-x-${m.id}`} label="x" plain hover={{ scope: `mission-x-${m.id}`, color: hex(STOP_RED), bold: true }} onPress={() => setSquad($, ms => ms.filter(x => x.id !== m.id))} />
-              <Text color={hex(STOP_RED)}>]</Text>
+              <Text color={state.color} dimColor={state.color === undefined}>{` ${state.mark} ${state.word} `}</Text>
+              {/* Ended (done, failed, stopped or recalled): [↻] runs it again. */}
+              {ended && (
+                <Box flexDirection="row">
+                  <Text>[</Text>
+                  <Button key={`mission-again-${m.id}`} label="↻" plain hover={{ scope: `mission-again-${m.id}`, bold: true }} onPress={() => rerunMission($, m.id)} />
+                  <Text>]</Text>
+                </Box>
+              )}
+              <Text>[</Text>
+              <Button key={`mission-x-${m.id}`} label="x" plain hover={{ scope: `mission-x-${m.id}`, bold: true }} onPress={() => dropMissions($, x => x.id !== m.id)} />
+              <Text>]</Text>
             </Box>
           </Box>
           <Box flexDirection="row" justifyContent="space-between">
-            <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)}`}</Text>
+            <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)}${folded ? ` · ${count('completed')}/${steps.length}` : ''}`}</Text>
             {/* What the whole combo has spent: a gold coin, spinning while it runs. */}
             <Text>
               <Text color={COIN.color} bold>{`${!ended && m.begunAt !== undefined ? COIN.frames[Math.floor(now / COIN.ms) % COIN.frames.length] : COIN.frames[0]} `}</Text>
@@ -2721,19 +2921,16 @@ export const register: Register = on => {
             </Text>
           </Box>
           {/* The subagent leading it, and in the end its report. */}
-          {!folded && m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true, m.id)}
+          {!folded && m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, { leads: true, missionId: m.id, recalled: m.recalled === true })}
           {/* Waves, closed to one line (how far its steps have got) until
               pressed open: each wave, its step cards and its condition, and
               the subagents no step names. */}
-          {!folded && (<Box flexDirection="row">
-            <Button
-              key={`mission-${m.id}-waves`}
-              label={`${wavesOpen ? '▾' : '▸'} Waves`}
-              plain
-              onPress={() => update($, squadOpenAtom, l => (l.includes(wavesKey) ? l.filter(k => k !== wavesKey) : [...l, wavesKey]))}
-            />
-            <Text dimColor wrap="truncate-end">{` · ${progress}`}</Text>
-          </Box>)}
+          {!folded && (
+            <Box flexDirection="row">
+              <Button key={wavesKey} label={`${wavesOpen ? '▾' : '▸'} Waves`} plain onPress={() => toggle(wavesKey)} />
+              <Text dimColor wrap="truncate-end">{` · ${progress}`}</Text>
+            </Box>
+          )}
           {!folded && wavesOpen && (
             <Box flexDirection="column" paddingLeft={2}>
               {m.waves.map((w, wi) => (
@@ -2744,7 +2941,7 @@ export const register: Register = on => {
                     {w.steps.length > 1 && <Text dimColor>{' · all at once'}</Text>}
                   </Text>
                   {w.steps.map((st, si) =>
-                    runBlock(`mission-${m.id}-${w.n}-${si}`, `/${st.skill}`, modelName(st.model), agentLabel(st.agent), st.run, ended, inner - 2),
+                    runBlock(`mission-${m.id}-${w.n}-${si}`, `/${st.skill}`, modelName(st.model), agentLabel(st.agent), st.run, ended, inner - 2, { helpers: st.helpers ?? [] }),
                   )}
                   {w.condition && <Text dimColor wrap="wrap">{`◆ ${w.condition}`}</Text>}
                 </Box>
@@ -2762,10 +2959,13 @@ export const register: Register = on => {
     })
     return (
       <Box flexDirection="column">
+        {scene}
         {/* [Clear All] at the top right takes every mission off the tab. */}
-        <Box flexDirection="row" justifyContent="flex-end" width={outer}>
-          <Button key="squad-clear" label="[Clear All]" plain onPress={() => setSquad($, () => [])} />
-        </Box>
+        {missions.length > 0 && (
+          <Box flexDirection="row" justifyContent="flex-end" width={outer}>
+            <Button key="squad-clear" label="[Clear All]" plain onPress={() => dropMissions($, () => false)} />
+          </Box>
+        )}
         {blocks}
       </Box>
     )

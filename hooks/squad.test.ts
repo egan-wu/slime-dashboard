@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { comboPrompt } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, coinText, settleLed, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, askingRun, clearedOf, missionCombo, missionState, stepStatus, coinText, settleLed, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
 import type { SquadRun } from './squad'
 
 const PLUGIN = 'slime-dashboard'
@@ -88,6 +88,15 @@ test('a mission keeps the combo as pressed; tags put each subagent on its step',
   expect(anyLive(ms)).toBe(false)
 })
 
+test('a mission gives back the combo it was a press of, and its prompt, for a run again', () => {
+  const m = newMission(4, RUN_TEST, 0, 'only the vitals tests')
+  expect(m.input).toBe('only the vitals tests')
+  expect(newMission(5, RUN_TEST, 0, '  ').input).toBeUndefined()
+  // The empty wave comes back empty, so the tags count as before.
+  expect(missionCombo(m)).toEqual({ ...RUN_TEST, layers: [RUN_TEST.layers[0]!, { steps: [] }, RUN_TEST.layers[2]!] })
+  expect(newMission(6, missionCombo(m), 0).waves).toEqual(m.waves)
+})
+
 test('two presses of one combo: the leader takes them up in turn', () => {
   let ms = [newMission(1, RUN_TEST, 0), newMission(2, RUN_TEST, 10)]
   ms = beginMission(ms, 'Run-Test', 20)
@@ -127,7 +136,7 @@ test('pressed fast, one combo twice: each subagent goes to the press its tag num
   expect(ms[0]!.waves[0]!.steps[0]!.run?.id).toBe('d2')
   expect(ms[1]!.waves[0]!.steps[0]!.run?.id).toBe('d1')
   // A numbered tag on a press never seen taken up begins it; one on an ended
-  // press takes it up again; a step already taken goes among its others.
+  // press takes it up again; a step already taken takes it as its helper.
   ms = attachRun(ms, { ...run('d3', '[Slow #3 3.1] test'), startedAt: 30 })!
   expect(ms[2]).toMatchObject({ begunAt: 30 })
   expect(ms[2]!.waves[1]!.steps[0]!.run?.id).toBe('d3')
@@ -136,7 +145,8 @@ test('pressed fast, one combo twice: each subagent goes to the press its tag num
   expect(ms.every(m => m.outcome === 'done')).toBe(true)
   ms = attachRun(ms, run('d4', '[Run-Test #1 1.1] build again'))!
   expect(ms[0]!.endedAt).toBeUndefined()
-  expect(ms[0]!.others.map(r => r.id)).toEqual(['d4'])
+  expect(ms[0]!.waves[0]!.steps[0]!.helpers?.map(r => r.id)).toEqual(['d4'])
+  expect(ms[0]!.others).toEqual([])
   // A number no mission has: as a tag without one.
   expect(attachRun([newMission(1, RUN_TEST, 0)], run('d5', '[Run-Test #8 1.1] x'))![0]!.waves[0]!.steps[0]!.run?.id).toBe('d5')
 })
@@ -177,9 +187,16 @@ test('a leader begins its mission, keeps it going, and ends it; what its steps s
   expect(ms[1]!.begunAt).toBe(0)
   expect(ms[0]!.begunAt).toBeUndefined()
   ms = attachRun(ms, run('b', '[Run-Test #2 1.1] build'), 'L2')!
-  // A helper the build sends out, untagged, goes to the build's mission.
+  // A helper the build sends out, untagged, is the build step's own; one the
+  // leader sends out, untagged, among the mission's others.
   ms = attachRun(ms, run('h', 'look around'), 'b')!
-  expect(ms[1]!.others.map(r => r.id)).toEqual(['h'])
+  expect(ms[1]!.waves[0]!.steps[0]!.helpers?.map(r => r.id)).toEqual(['h'])
+  expect(ms[1]!.others).toEqual([])
+  // The build answered, its helper still runs: the step still runs.
+  const built = updateRun(ms, 'b', r => ({ ...r, status: 'completed' }))!
+  expect(stepStatus(built[1]!.waves[0]!.steps[0]!)).toBe('running')
+  expect(stepStatus(updateRun(built, 'h', r => ({ ...r, status: 'completed' }))![1]!.waves[0]!.steps[0]!)).toBe('completed')
+  expect(stepStatus(built[1]!.waves[1]!.steps[0]!)).toBeUndefined()
   // The person's turn ends: the leader still runs, so its mission goes on.
   ms = endMissions(ms, 'done', 5)
   expect(ms[1]!.endedAt).toBeUndefined()
@@ -229,6 +246,40 @@ test('a leader that answered while a helper still ran: its mission ends once the
   expect(settleLed(ms, 9)).toBeUndefined()
 })
 
+test('a step that left work in the background awaits it: running until woken and done, or until its mission ends', () => {
+  let ms = attachRun([newMission(1, RUN_TEST, 0)], run('L', '[Run-Test #1] lead the Party Combo'))!
+  ms = attachRun(ms, run('b', '[Run-Test #1 1.1] build'), 'L')!
+  ms = updateRun(ms, 'b', r => ({ ...r, awaiting: true }))!
+  ms = updateRun(ms, 'L', r => ({ ...r, status: 'completed', endedAt: 5 }))!
+  expect(stepStatus(ms[0]!.waves[0]!.steps[0]!)).toBe('running')
+  // Woken by its work's end, it runs on (no longer awaiting) until its turn ends.
+  const woken = reviveRun(ms, 'b')!
+  expect(woken[0]!.waves[0]!.steps[0]!.run).toMatchObject({ status: 'running' })
+  expect(woken[0]!.waves[0]!.steps[0]!.run?.awaiting).toBeUndefined()
+  // Its leader had its report and ended: the mission ends, the step done with it.
+  ms = endLed(ms, 'L', 'done', 6)!
+  expect(ms[0]).toMatchObject({ endedAt: 6, outcome: 'done' })
+  expect(ms[0]!.waves[0]!.steps[0]!.run).toMatchObject({ status: 'completed', awaiting: false, endedAt: 6 })
+})
+
+test('how a mission stands: queued, running, asking, and as it ended; the missions cleared', () => {
+  const m = newMission(1, RUN_TEST, 0)
+  expect(missionState(m)).toBe('queued')
+  let ms = attachRun([m], run('L', '[Run-Test #1] lead the Party Combo'))!
+  expect(missionState(ms[0]!)).toBe('running')
+  ms = attachRun(ms, run('b', '[Run-Test #1 1.1] build'), 'L')!
+  ms = attachRun(ms, run('h', 'look'), 'b')!
+  ms = updateRun(ms, 'h', r => ({ ...r, asking: { question: 'Which file?' } }))!
+  expect(missionState(ms[0]!)).toBe('asking')
+  expect(askingRun(runsOf(ms))?.id).toBe('h')
+  expect(clearedOf(ms, [])).toBeUndefined()
+  const done = [{ ...ms[0]!, endedAt: 9, outcome: 'done' as const }, { ...newMission(2, RUN_TEST, 0), endedAt: 9, outcome: 'stopped' as const }]
+  expect(missionState(done[0]!)).toBe('done')
+  expect(missionState(done[1]!)).toBe('stopped')
+  expect(clearedOf(done, [])).toEqual([1])
+  expect(clearedOf(done, [1])).toBeUndefined()
+})
+
 test('the agents a leader spawned, unseen by agent.spawn, are found in the agent list', () => {
   let ms = attachRun([newMission(1, RUN_TEST, 0)], run('L1', '[Run-Test #1] lead the Party Combo'))!
   const agents = [
@@ -239,8 +290,11 @@ test('the agents a leader spawned, unseen by agent.spawn, are found in the agent
   ]
   expect(agentsToFollow(ms, agents, 'sonnet')).toEqual([{ id: 'a', description: '[Run-Test #1 3.2] check', parentId: 'L1', model: 'opus' }])
   ms = attachRun(ms, run('a', '[Run-Test #1 3.2] check'), 'L1')!
-  // Once followed, never again; a helper it sends out comes next, on the fallback.
+  // Once followed, never again; a helper it sends out comes next, on its step's
+  // model as far as known, else the fallback.
   expect(agentsToFollow(ms, [...agents, { id: 'h', description: 'look', parentId: 'a' }], 'sonnet')).toEqual([{ id: 'h', description: 'look', parentId: 'a', model: 'sonnet' }])
+  ms = updateRun(ms, 'a', r => ({ ...r, model: 'claude-opus-5-5' }))!
+  expect(agentsToFollow(ms, [{ id: 'h', description: 'look', parentId: 'a' }], 'sonnet')[0]!.model).toBe('claude-opus-5-5')
 })
 
 const STEP_USAGE = { input_tokens: 3, output_tokens: 200, cache_read_input_tokens: 28_000, cache_creation_input_tokens: 1_500 }
@@ -350,20 +404,21 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(/· 59k tok/)).toBeDefined()
   // The mission's coin counts them up: K and M.
   expect(await text('59K')).toBeDefined()
-  expect(await text('Other subagents')).toBeDefined()
+  // The helper the build sent out is on the build's own card.
+  expect(await text('Other subagents')).toBeUndefined()
   expect(await text('look around')).toBeDefined()
-  await squad.press({ key: 'mission-1-o0-fold' })
-  // The build answers.
+  // The build answers; its helper still runs, and the step with it.
   await $.turn.complete({ reason: 'answer', answer: 'Built calc.\nAll good.', durationMs: 1, turnId: 't1', isAborted: false, agentId: 's2' } as never)
-  expect(await text(' done')).toBeDefined()
   expect(await text('  Built calc.')).toBeDefined()
-  expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
+  expect(await text(' · 2 waves · 0/3 done · 1 running')).toBeDefined()
+  expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeDefined()
   // The person's own turn ends: the mission is the leader's, and goes on.
   await $.turn.complete({ reason: 'answer', answer: 'Hello.', durationMs: 1, turnId: 't0', isAborted: false } as never)
   expect(await text(' leading')).toBeDefined()
   // The helper answers, then the leader: the mission ends with it, the later steps never reached.
   await $.turn.complete({ reason: 'answer', answer: 'Looked.', durationMs: 1, turnId: 't2', isAborted: false, agentId: 's3' } as never)
-  expect(await text(' leading')).toBeDefined()
+  expect(await text(' done')).toBeDefined()
+  expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
   expect(await text(' leading')).toBeDefined()
   await $.turn.complete({ reason: 'answer', answer: 'Build OK; the check never ran.', durationMs: 1, turnId: 't3', isAborted: false, agentId: 's1' } as never)
   // Done: how long it took follows its waves' count.
@@ -374,6 +429,9 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(titles.at(-1)).toBe('Dungeon')
   expect(await squad.find({ key: 'mission-1-lead-recall' })).toBeUndefined()
   expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeUndefined()
+
+  // Ended, it can be run again; still going, it cannot.
+  expect(await squad.find({ key: 'mission-again-1' })).toBeDefined()
 
   // A second press; [Recall] calls the whole mission back, leader first.
   const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -386,13 +444,111 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(stopped).toEqual(['s4', 's5'])
   expect(await text(' · 2 waves · 0/3 done · 1 stopped · 0s')).toBeDefined()
   expect(await squad.find({ key: 'mission-2-lead-recall' })).toBeUndefined()
+  // Its leader's card, and its banner, say it was recalled.
+  expect((await squad.findAll({ type: 'Text', text: ' recalled' })).length).toBe(2)
+  expect(await text(' ■ recalled ')).toBeDefined()
+  // [↻] runs it again as a mission of its own (#3); #2 stays recalled.
+  await squad.press({ key: 'mission-again-2' })
+  expect(await squad.find({ key: 'mission-3-fold' })).toBeDefined()
+  expect(await squad.find({ key: 'mission-again-3' })).toBeUndefined()
+  expect(await text(' ■ recalled ')).toBeDefined()
+  expect(titles.at(-1)).toBe('Dungeon (1)')
+  await squad.press({ key: 'mission-x-3' })
   await squad.press({ key: 'mission-x-2' })
   // [x] takes one mission off; [Clear All] the rest.
   expect(await squad.find({ key: 'squad-clear' })).toBeDefined()
   expect(await squad.find({ key: 'mission-x-1' })).toBeDefined()
   await squad.press({ key: 'mission-x-1' })
   expect(await squad.find({ key: 'mission-1-fold' })).toBeUndefined()
-  expect(await text(/No Party Combo sent yet/)).toBeDefined()
+  // None left: the scene alone, its board counting the one cleared.
+  expect(await text(/No Party Combo sent yet/)).toBeUndefined()
+  expect(await squad.find({ key: 'dungeon-scene' })).toBeDefined()
   expect(await squad.find({ key: 'squad-clear' })).toBeUndefined()
+  await squad.unmount()
+})
+
+test('Dungeon: a step asks the person on its card; folded, a mission says how it stands; a step leaving work in the background keeps running', async ($, on) => {
+  const kept = new Map<string, unknown>([['combos', [RUN_TEST]]])
+  on('store.get', async (_$, e) => ({ value: kept.get(e.key) }))
+  on('store.set', async (_$, e) => (kept.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }))
+  mock.clock(on)
+  const opened: string[] = []
+  const titles: string[] = []
+  on('ui.panes', async () => ({ value: opened.map(id => ({ id, title: '', isShown: true, hasFocus: false, isPlaced: true })) }) as never)
+  on('ui.open', async (_$, e) => {
+    opened.push(e.id)
+    if (e.id === 'dungeon') titles.push(e.title ?? '')
+    return { value: { isPlaced: true } }
+  })
+  let spawned = 0
+  const agents: { id: string; description: string; status: string; parentId?: string }[] = []
+  on('agent.spawn', async (_$, e) => {
+    const id = `s${++spawned}`
+    agents.push({ id, description: e.description, status: 'running' })
+    return { agentId: id, model: 'claude-sonnet-5-5' }
+  })
+  on('agent.list', async () => ({ value: agents }) as never)
+  on('classic.UserPromptSubmit', async () => ({}))
+  // The wait for an answer sleeps in the engine, a second at a time: the
+  // person looks and answers meanwhile.
+  let sleeps = 0
+  let meanwhile: (() => Promise<void>) | undefined
+  on('process.run', async () => {
+    sleeps++
+    const act = meanwhile
+    meanwhile = undefined
+    await act?.()
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('tool.call', async () => ({ result: 'ok' }))
+  on('turn.complete', async () => ({ text: '' }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE } as never
+  })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'skills-toggle' })
+  await ui.press({ key: 'combo-Run-Test' })
+  await ui.unmount()
+  const squad = await $.ui.mount({ ...SQUAD, surface: 'terminal' })
+  const text = async (t: string | RegExp) => squad.find({ type: 'Text', text: t })
+  // The scene is over it all; folded, the mission says how it stands and how far it got.
+  expect(await squad.find({ key: 'dungeon-scene' })).toBeDefined()
+  expect(await text(' ◐ running ')).toBeDefined()
+  expect(await text('#1 · 1970-01-01 00:00 · 0/3')).toBeDefined()
+  await $.agent.spawn({ prompt: 'Build.', description: '[Run-Test #1 1.1] build calc', parentAgentId: 's1' } as never)
+
+  // The build asks: its card opens on the question, the tab and the banner say so.
+  const seen: Record<string, unknown> = {}
+  meanwhile = async () => {
+    for (const q of ['  ? Which target?', ' ? asking ', '] release']) seen[q] = await text(q)
+    seen.title = titles.at(-1)
+    await squad.press({ key: 'mission-1-1-0-ask-1' })
+  }
+  expect(await $.tool.call({ tool: 'mcp__slime-dashboard__ask_person', question: 'Which target?', options: ['debug', 'release'], agentId: 's2' } as never)).toMatchObject({ result: 'release' })
+  expect(seen['  ? Which target?']).toBeDefined()
+  expect(seen[' ? asking ']).toBeDefined()
+  expect(seen['] release']).toBeDefined()
+  expect(seen.title).toBe('Dungeon (1) ?')
+  expect(sleeps).toBe(1)
+  expect(await text('  ? Which target?')).toBeUndefined()
+  expect(titles.at(-1)).toBe('Dungeon (1)')
+  // Asked again, it is answered in the field.
+  meanwhile = () => squad.input({ key: 'mission-1-1-0-ask-input', text: '-O2', kind: 'submit' }).then(() => {})
+  expect(await $.tool.call({ tool: 'mcp__slime-dashboard__ask_person', question: 'Which flags?', agentId: 's2' } as never)).toMatchObject({ result: '-O2' })
+
+  // The build sends its tests to the background and ends its turn: it awaits them, still running.
+  await $.tool.call({ tool: 'Bash', command: 'npm test', run_in_background: true, agentId: 's2' } as never)
+  await $.turn.complete({ reason: 'answer', answer: 'Tests started.', durationMs: 1, turnId: 't1', isAborted: false, agentId: 's2' } as never)
+  agents.find(a => a.id === 's2')!.status = 'completed'
+  expect(await text(' · 2 waves · 0/3 done · 1 running')).toBeDefined()
+  expect(await text(/background work/)).toBeDefined()
+  // Woken when they end, it reports, done.
+  const stream = $.turn.step({ turnId: 't2', index: 0, agentId: 's2', model: 'claude-haiku-5-5' } as never)
+  for await (const _ of stream);
+  await $.turn.complete({ reason: 'answer', answer: 'Tests pass.', durationMs: 1, turnId: 't2', isAborted: false, agentId: 's2' } as never)
+  expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
+  // The [x] on a mission's banner is plain, not red.
+  expect(await squad.find({ key: 'mission-x-1' })).toBeDefined()
   await squad.unmount()
 })

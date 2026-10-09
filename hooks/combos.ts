@@ -127,6 +127,12 @@ export const stepTag = (combo: string, layer: number, step: number, mission?: nu
 // conversation is never the one that leads it.
 export const LEADER_MODEL: ComboModel = 'sonnet'
 
+// The tool a combo's subagents ask the person with (served by register.tsx):
+// the question shows on the step's card in Dungeon, and the answer comes back
+// as the tool's result.
+export const ASK_TOOL_NAME = 'ask_person'
+export const ASK_TOOL = `mcp__slime-dashboard__${ASK_TOOL_NAME}`
+
 // The description a leader's Agent call starts with: `[Run-Test #3] lead`.
 export const leaderTag = (combo: string, mission: number) => `[${combo} #${mission}] lead`
 
@@ -143,7 +149,8 @@ export function comboPrompt(combo: Combo, input: string, mission?: number, subag
     `Run the Party Combo "${combo.name}"${mission === undefined ? '' : ` (mission #${mission})`}. You lead it: hand each step below to a subagent with the Agent tool, with exactly the model and subagent_type it names, and do not do a step's work yourself.`,
     'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and whatever earlier steps found that it needs.' +
       (subagent
-        ? ' However the Agent tool runs them, wait for every report of a wave before you go on. A step the person stopped is not run again: take it as failed, and judge the condition on that.'
+        ? ' However the Agent tool runs them, wait for every report of a wave before you go on. A step the person stopped is not run again: take it as failed, and judge the condition on that.' +
+          ` Tell each subagent too: whatever it sends out (a subagent, a background command), it waits for before it reports; and where its skill would ask the person something, it asks with the ${ASK_TOOL} tool and waits for the answer, never guessing it. Ask the person that way yourself, if you must.`
         : ''),
     '',
     `Input: ${input.trim() || '(none)'}`,
