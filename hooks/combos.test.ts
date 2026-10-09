@@ -84,6 +84,11 @@ test('the leader is told each layer in order, its steps fanned out at once, and 
   expect(text).toContain('judge what came back: If Pass, report done and stop; if Fail, report Fail and go on.')
   expect(text.indexOf('Wave 1:')).toBeLessThan(text.indexOf('Wave 2:'))
   expect(comboPrompt({ name: 'Empty', layers: [{ steps: [] }] }, '')).toBeUndefined()
+  // A press's mission number goes in its first line and every tag.
+  const numbered = comboPrompt(runTest(), '', 7)!
+  expect(numbered).toContain('Run the Party Combo "Run-Test" (mission #7).')
+  expect(numbered).toContain('- [Run-Test #7 3.2] skill /archive')
+  expect(stepTag('Run-Test', 0, 0, 7)).toBe('[Run-Test #7 1.1]')
 })
 
 test('Party Combo section builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
@@ -135,7 +140,7 @@ test('Party Combo section builds a combo in a draft; [Save] keeps it and the Ski
   await ui.input({ key: 'skill-prompt-0', text: 'all tests', kind: 'change' })
   await ui.press({ key: 'combo-Run-Test' })
   expect(sent).toHaveLength(1)
-  expect(sent[0]).toContain('[Run-Test 2.1] skill /unit-test, model sonnet')
+  expect(sent[0]).toContain('[Run-Test #1 2.1] skill /unit-test, model sonnet')
   expect(sent[0]).toContain('Input: all tests')
   // A trial edit left unsaved runs nothing new: the Skill Box runs the saved combo.
   await ui.press({ key: 'step-remove-1-0' })

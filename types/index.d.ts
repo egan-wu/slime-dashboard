@@ -1,3 +1,5 @@
+import type { Mission } from '../hooks/squad'
+
 export type SlimeModel = string
 // A Skill Box skill (hooks/skills.ts): its command, category and dim description.
 // A Party Combo (hooks/combos.ts): layers of skills, each step's model and
@@ -53,6 +55,9 @@ declare module 'claude-code' {
       skillOrder: Record<string, string[]>
       catOrder: string[]
       combos: SlimeCombo[]
+      squad: Mission[]
+      squadNow: number
+      squadSeq: number
       treeOpen: boolean
       comboSel: string
       comboPick: number
