@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { EMERGE_TICKS, frame, setPerformance, RESPAWN, RESPAWN_COLORS, respawnLength, GOO_COLORS, goos, modelInfo, partyFrame, partyLength, rockLift, ROWS, scattered, step, treeKind } from './scene'
 import type { Offsets } from './scene'
-import { parseWeather, weatherNow } from './weather'
+import { LOCAL_RISE, LOCAL_SET, localWeather, parseWeather, SKY_ODDS, skyForHour, weatherNow } from './weather'
 
 const fresh = (): Offsets => ({ cloud: 0, bird: 0, tree: 0, rock: 0, ground: 0 })
 
@@ -56,6 +56,28 @@ test('slimes leap over rocks with one pixel to spare', async () => {
   expect(rockLift(10, 6, [6])).toBe(2) // one column behind: landing
   expect(rockLift(10, 6, [5])).toBe(1)
   expect(rockLift(10, 6, [20])).toBe(0) // far away: normal hop
+})
+
+test('weather without wttr.in: day by the clock, a sky drawn each hour', async () => {
+  // 05:59 is night, 06:00 day, 17:59 day, 18:00 night, in the zone given.
+  const at = (h: number, m: number) => Date.UTC(2026, 9, 9, h, m)
+  expect(localWeather(at(5, 59), 0).day).toBe(false)
+  expect(localWeather(at(6, 0), 0).day).toBe(true)
+  expect(localWeather(at(17, 59), 0).day).toBe(true)
+  expect(localWeather(at(18, 0), 0).day).toBe(false)
+  expect(localWeather(at(22, 0), 8 * 60).day).toBe(true) // 06:00 at +0800
+  expect(LOCAL_RISE).toBeLessThan(LOCAL_SET)
+  // The same hour draws the same sky; the whole hour keeps it.
+  expect(localWeather(at(10, 5), 0).sky).toBe(localWeather(at(10, 55), 0).sky)
+  expect(skyForHour(123_456)).toBe(skyForHour(123_456))
+  // Over many hours each sky comes up, fair weather most, snow least.
+  const seen = new Map<string, number>()
+  for (let h = 0; h < 20_000; h++) seen.set(skyForHour(h), (seen.get(skyForHour(h)) ?? 0) + 1)
+  const share = (sky: string) => (seen.get(sky) ?? 0) / 20_000
+  for (const [sky, w] of SKY_ODDS) expect(Math.abs(share(sky) - w / 100)).toBeLessThan(0.02)
+  expect(share('clear')).toBeGreaterThan(share('partly'))
+  expect(share('rain')).toBeGreaterThan(share('snow'))
+  expect(share('snow')).toBeGreaterThan(0)
 })
 
 test('weather: wttr.in reply to day or night and a sky', async () => {

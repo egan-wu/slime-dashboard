@@ -264,8 +264,22 @@ test('/slime-dashboard weather reads the sky now, and says why when it cannot', 
   const weather = () =>
     $.command.run({ command: PLUGIN, args: 'weather', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
 
-  expect((await weather()).text).toBe('Weather: night, cloudy (wttr.in said "mmm|05:50:42|17:38:27|00:39:17+0800").')
+  // Off by default: the clock's sky, and wttr.in never asked.
+  expect((await weather()).text).toMatch(/^Weather: (day|night), (clear|partly|cloudy|rain|snow) \(from this computer's clock; Setting's Weather is Off\)\.$/)
+  expect(agents).toEqual([])
+
+  // Setting's Weather [Off] turns it on (and reads it at once).
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'settings-toggle' })
+  expect((await ui.find({ key: 'weather-live' }))?.text).toBe('[Off]')
+  await ui.press({ key: 'weather-live' })
+  expect((await ui.find({ key: 'weather-live' }))?.text).toBe('[On]')
+  await ui.press({ key: 'settings-toggle' })
+  await ui.unmount()
   expect(agents).toEqual(['curl/8'])
+
+  expect((await weather()).text).toBe('Weather: night, cloudy (wttr.in said "mmm|05:50:42|17:38:27|00:39:17+0800").')
+  expect(agents).toEqual(['curl/8', 'curl/8'])
 
   reply = { status: 503, ok: false, text: 'busy' }
   expect((await weather()).text).toContain('could not read wttr.in (HTTP 503)')

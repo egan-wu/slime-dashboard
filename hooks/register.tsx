@@ -22,7 +22,7 @@ import { VERSION } from './version'
 import { cacheKept, returnVerdict, WARM_PROMPT, warmStep } from './warming'
 import { addToDay, dayKey, journalFrom, pingPays, READ_COST, rewriteCost, summaryOf } from './journal'
 import type { Day } from './journal'
-import { DEFAULT_WEATHER, parseWeather, WEATHER_URL, weatherNow } from './weather'
+import { DEFAULT_WEATHER, localWeather, parseWeather, WEATHER_URL, weatherNow } from './weather'
 import type { SlimeMinion, SlimeRecentSession, SlimeWeather } from '../types'
 
 const PANE = 'slime-dashboard'
@@ -249,6 +249,13 @@ const HIDDEN_KEY = 'hidden'
 const COLORS_KEY = 'colors'
 const ORDER_KEY = 'order'
 const WIDTH_KEY = 'width'
+// Setting's Weather: whether the sky is read from wttr.in, which places the
+// machine by its IP address. Off unless chosen, kept across sessions; off, the
+// sky follows this computer's clock and draws its weather by the hour.
+const LIVE_WEATHER_KEY = 'liveWeather'
+const liveWeatherAtom = atom({ plugin: 'slime-dashboard', key: 'liveWeather' } as const, false)
+let liveWeather = false
+
 // Setting's Performance, kept across sessions.
 const PERF_KEY = 'performance'
 const perfAtom = atom({ plugin: 'slime-dashboard', key: 'performance' } as const, 'high' as Perf)
@@ -712,6 +719,10 @@ async function dropGone($: EngineInterface) {
 // Answers what it read, or why it read nothing, for `/slime-dashboard weather`.
 let retryPending = false
 async function refreshWeather($: EngineInterface): Promise<string> {
+  if (!liveWeather) {
+    const next = await localSky($)
+    return `Weather: ${next.day ? 'day' : 'night'}, ${next.sky} (from this computer's clock; Setting's Weather is Off).`
+  }
   let why: string
   try {
     // wttr.in answers a browser with a page; asked as curl, with the line alone.
@@ -735,6 +746,25 @@ async function refreshWeather($: EngineInterface): Promise<string> {
     })
   }
   return `Weather: could not read wttr.in (${why}); the sky stays as it was and tries again in two minutes.`
+}
+
+// The sky without wttr.in, kept when it changed: day or night by this
+// computer's clock, the hour's weather drawn.
+async function localSky($: EngineInterface) {
+  const next = localWeather(await $.clock.now(), tzOffset ?? 0)
+  if (next.day !== weather.day || next.sky !== weather.sky || weather.rise !== undefined) {
+    weather = next
+    await update($, weatherAtom, () => next)
+  }
+  return weather
+}
+
+// Setting's Weather: on, the sky is read from it at once; off, the clock's.
+async function setLiveWeather($: EngineInterface, on: boolean) {
+  liveWeather = on
+  await update($, liveWeatherAtom, () => on)
+  await $.store.set(LIVE_WEATHER_KEY, on)
+  await refreshWeather($)
 }
 
 // A session between models (as /clear passes) names none for a moment: the
@@ -1144,6 +1174,8 @@ export const register: Register = on => {
     minions = (await read($, minionsAtom)).filter(m => !m.done)
     await update($, minionsAtom, () => minions)
     weather = await read($, weatherAtom)
+    liveWeather = (await $.store.get(LIVE_WEATHER_KEY)) === true
+    await update($, liveWeatherAtom, () => liveWeather)
     vitals = await read($, vitalsAtom)
     await refreshModel($)
     await refreshVitals($)
@@ -1160,9 +1192,9 @@ export const register: Register = on => {
       await update($, widthAtom, () => Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, widthKept)))
     }
     void openPane($)
-    void readLocalZone($)
+    // The zone first: the clock's sky reads the hour in it.
+    void readLocalZone($).then(() => refreshWeather($))
     void readSessionTitle($)
-    void refreshWeather($)
     $.clock.every(WEATHER_MS, () => refreshWeather($))
     // GitHub is asked for a newer dashboard once a load: at session start and
     // at each reload.
@@ -1183,8 +1215,10 @@ export const register: Register = on => {
         await refreshModel($)
         await refreshVitals($)
       }
-      // Once a minute, day or night moves on from the last read's sunrise and sunset.
-      if (tick % 600 === 0) {
+      // Once a minute, day or night moves on from the last read's sunrise and
+      // sunset; without wttr.in, the clock's sky (a new hour, a new draw).
+      if (tick % 600 === 0 && !liveWeather) await localSky($)
+      else if (tick % 600 === 0) {
         const moved = weatherNow(weather, await $.clock.now())
         if (moved !== weather) {
           weather = moved
@@ -1384,6 +1418,7 @@ export const register: Register = on => {
     const colors = await read($, colorsAtom)
     setColors(colors)
     const perfLevel = await read($, perfAtom)
+    const liveWeatherOn = await read($, liveWeatherAtom)
     setPerformance(perfLevel)
     const perfOpen = await read($, perfOpenAtom)
     const colorOpen = await read($, colorOpenAtom)
@@ -1590,6 +1625,11 @@ export const register: Register = on => {
                 <Text dimColor>: animation effect</Text>
               </Box>
             )}
+            <Box flexDirection="row" marginLeft={2}>
+              <Text>{'[Weather] '}</Text>
+              <Button key="weather-live" label={liveWeatherOn ? '[On]' : '[Off]'} plain onPress={() => setLiveWeather($, !liveWeatherOn)} />
+              <Text dimColor>{liveWeatherOn ? ': real weather from wttr.in' : ': weather by clock'}</Text>
+            </Box>
             <Box flexDirection="row" marginLeft={2}>
               <Button key="reload" label="[Reload]" plain onPress={() => reloadDashboard($)} />
               <Text dimColor>: reload dashboard</Text>

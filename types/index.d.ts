@@ -41,6 +41,7 @@ declare module 'claude-code' {
       recentSessions: SlimeRecentSession[]
       respawnConfirm: boolean
       performance: 'high' | 'mid' | 'low'
+      liveWeather: boolean
       perfOpen: boolean
       waiting: boolean
       skills: SlimeSkill[]

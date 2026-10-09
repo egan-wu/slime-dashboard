@@ -48,3 +48,43 @@ export function weatherNow(w: Weather, now: number): Weather {
   const day = minute >= w.rise && minute < w.set
   return day === w.day ? w : { ...w, day }
 }
+
+// Without wttr.in (Setting's default, so no address leaves the machine): day
+// from this computer's clock, 06:00 to 18:00, and each hour a sky drawn at
+// random, fair weather most often, the extremes now and then but never ruled out.
+export const LOCAL_RISE = 6 * 60
+export const LOCAL_SET = 18 * 60
+export const SKY_ODDS: readonly (readonly [Sky, number])[] = [
+  ['clear', 40],
+  ['partly', 28],
+  ['cloudy', 18],
+  ['rain', 10],
+  ['snow', 4],
+]
+
+// A number in [0, 1) for the hour, the same each time it is asked: every
+// window, and every reload in that hour, draws the same sky.
+function roll(hour: number): number {
+  let h = Math.imul(hour ^ 0x9e3779b9, 0x85ebca6b)
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35)
+  h ^= h >>> 16
+  return (h >>> 0) / 2 ** 32
+}
+
+// The sky for one hour (hours since the epoch, in this computer's own time).
+export function skyForHour(hour: number): Sky {
+  const total = SKY_ODDS.reduce((n, [, w]) => n + w, 0)
+  let left = roll(hour) * total
+  for (const [sky, w] of SKY_ODDS) {
+    if (left < w) return sky
+    left -= w
+  }
+  return 'clear'
+}
+
+// The sky at `now`, `offset` minutes from UTC (this computer's zone).
+export function localWeather(now: number, offset: number): Weather {
+  const local = now + offset * 60_000
+  const minute = ((Math.floor(local / 60_000) % 1440) + 1440) % 1440
+  return { day: minute >= LOCAL_RISE && minute < LOCAL_SET, sky: skyForHour(Math.floor(local / 3_600_000)) }
+}

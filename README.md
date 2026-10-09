@@ -37,7 +37,7 @@ The sign is also a button. Pressed, it opens a field under it; type a new name a
 - **Its face**: walking with CP at 50% it squints (`> <`), at 70% a `#` shows beside its head, at 90% it is in tears (`T T`). Out of HP or MP it stops with `x` eyes until a limit resets and thinks of the potion it needs: a small dot rises beside its head, then a bigger one, then a thought bubble at its upper left holding blue mana for MP or red health for HP, and around again.
 - **Unloading**: while the context compacts (`[Unload]`, `/compact`, or automatically) it wakes up if asleep and sets its load down until the compaction ends: every few beats its body flashes white and it spits the goo it ate back out of its back in a spray of colored blocks, and green `↓` arrows fall beside it.
 - **Subagents**: each one buds off a little slime in its model's color that follows it. When the work is done the troop finds a treasure chest.
-- **Weather**: the sky follows day or night and the weather where you are, read from [wttr.in](https://wttr.in) every hour, with day turning to night at sunset in between (wttr.in places you by your IP address). Moon, stars and birds hide under an overcast sky.
+- **Weather**: by default the sky follows this computer's clock, day from 06:00 to 18:00, and each hour draws its weather at random: clear or partly cloudy most often, cloudy less, rain now and then, snow rarely. Nothing leaves the machine for it. Turning Setting's `[Weather]` to `[On]` reads the real weather where you are from [wttr.in](https://wttr.in) every hour instead, with day turning to night at sunset in between (wttr.in places you by your IP address, which is why it is off unless you choose it). Moon, stars and birds hide under an overcast sky.
 - **Model buttons** `■:Haiku ■:Sonnet ■:Opus ■:Fable` switch the session's model (`/model haiku`, …): each family's newest model.
 
 | Asleep | Waiting on you |
@@ -135,7 +135,7 @@ What the cache did, kept on this computer for thirty days across sessions. `▼ 
 
 ## Setting
 
-<img src="docs/setting.png" width="340" alt="Setting open: Update, Display, Color, Order, Width and Reload, then the version">
+<img src="docs/setting.png" width="340" alt="Setting open: Update, Display, Color, Order, Width, Performance, Weather (Off) and Reload, then the version">
 
 | Button | What it does |
 | --- | --- |
@@ -145,6 +145,7 @@ What the cache did, kept on this computer for thirty days across sessions. `▼ 
 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
 | `[Performance]` | How much the scene draws, kept across sessions. Pressed, a rounded box opens with `[High][Mid][Low]`, the current one bright; picking one closes it. High draws everything. Mid draws about 30% fewer things along the way (trees, rocks, goo, clouds, birds) and half of Unload's spray and Respawn's motes; Low about half the things and 30% of the spray and motes. |
+| `[Weather] [Off]` | Off by default; pressed, it turns `[On]`, and pressed again back `[Off]`. On, the sky shows the real weather where you are, read from [wttr.in](https://wttr.in) every hour (it places you by your IP address); Off, day and night follow this computer's clock and the weather is drawn at random each hour. Kept across sessions. |
 | `[Reload]` | Reloads the dashboard (`/reload-plugins`), as saving its files would. |
 
 The plugin's version shows at the pane's foot.
@@ -160,7 +161,7 @@ Each section above can be hidden or moved with Setting's `[Display]` and `[Order
 /slime-dashboard add <skill> [--category <name>] [--desc <words>]
 /slime-dashboard remove <skill>
 /slime-dashboard list                              the Skill Box's skills, by category
-/slime-dashboard weather                           read the sky now, and say what came back
+/slime-dashboard weather                           read the sky now (wttr.in if Weather is On, else the clock), and say what came back
 ```
 
 Skills go in the Skill Box with `add`. Without `--category` a skill goes under **General**; `--desc` comes last and runs to the end of the line, drawn dim after the skill's name. Adding a skill again files it anew.

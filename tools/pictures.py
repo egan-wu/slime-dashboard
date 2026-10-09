@@ -280,6 +280,7 @@ def setting_rows():
         [run('  [Order]'), run(': arrange sections', DIM)],
         [run('  [Width] [-] 33 [+]'), run(': panel width', DIM)],
         [run('  [Performance]'), run(': animation effect', DIM)],
+        [run('  [Weather] [Off]'), run(': weather by clock', DIM)],
         [run('  [Reload]'), run(': reload dashboard', DIM)],
     ) + [(version(), None)]
 
