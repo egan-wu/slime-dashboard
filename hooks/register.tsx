@@ -2651,6 +2651,9 @@ export const register: Register = on => {
       const ended = m.endedAt !== undefined
       const took = m.begunAt !== undefined && ended ? elapsed(m.endedAt! - m.begunAt) : ''
       const spent = tokensOf([m])
+      // The combo's name folds the mission to its first two lines, and opens it again.
+      const foldKey = `mission-${m.id}-fold`
+      const folded = open.includes(foldKey)
       const wavesKey = `mission-${m.id}-waves`
       const wavesOpen = open.includes(wavesKey)
       const steps = m.waves.flatMap(w => w.steps)
@@ -2675,7 +2678,13 @@ export const register: Register = on => {
               sent, how it stands, how long, and its subagents' tokens. */}
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" backgroundColor={COMBO.banner} paddingX={1} flexShrink={1} minWidth={0}>
-              <Text bold color={COMBO.text} wrap="truncate-end">{m.combo}</Text>
+              <Button
+                key={foldKey}
+                label={`${folded ? '▸' : '▾'} ${m.combo}`}
+                plain
+                hover={{ scope: foldKey, color: COMBO.text, bold: true }}
+                onPress={() => update($, squadOpenAtom, l => (l.includes(foldKey) ? l.filter(k => k !== foldKey) : [...l, foldKey]))}
+              />
             </Box>
             <Box flexDirection="row" flexShrink={0}>
               <Text color={hex(STOP_RED)}>[</Text>
@@ -2692,11 +2701,11 @@ export const register: Register = on => {
             </Text>
           </Box>
           {/* The subagent leading it, and in the end its report. */}
-          {m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true, m.id)}
+          {!folded && m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true, m.id)}
           {/* Waves, closed to one line (how far its steps have got) until
               pressed open: each wave, its step cards and its condition, and
               the subagents no step names. */}
-          <Box flexDirection="row">
+          {!folded && (<Box flexDirection="row">
             <Button
               key={`mission-${m.id}-waves`}
               label={`${wavesOpen ? '▾' : '▸'} Waves`}
@@ -2704,8 +2713,8 @@ export const register: Register = on => {
               onPress={() => update($, squadOpenAtom, l => (l.includes(wavesKey) ? l.filter(k => k !== wavesKey) : [...l, wavesKey]))}
             />
             <Text dimColor wrap="truncate-end">{` · ${progress}`}</Text>
-          </Box>
-          {wavesOpen && (
+          </Box>)}
+          {!folded && wavesOpen && (
             <Box flexDirection="column" paddingLeft={2}>
               {m.waves.map((w, wi) => (
                 <Box key={`mission-${m.id}-w${w.n}`} flexDirection="column">

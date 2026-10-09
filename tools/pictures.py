@@ -298,7 +298,7 @@ def card(fold, mark, color, title, word, extra=(), second=None):
 def dungeon_rows():
     """Dungeon's tab, as wide as DUNGEON_W: a mission running with its waves
     open, and one done, closed to a glance."""
-    banner = lambda name: [run(f' {name} ', (255, 255, 255), True, PURPLE)]
+    banner = lambda name, fold='▾': [run(f' {fold} {name} ', (255, 255, 255), True, PURPLE)]
     x = [run('[', STOP), run('x'), run(']', STOP)]
     btn = lambda label: [run(' [', DIM), run(label), run(']', DIM)]
     running = ('frame', [
@@ -331,7 +331,11 @@ def dungeon_rows():
         ], GREEN),
         [run('▸ Waves'), run(' · 4 waves · 4/4 done · 1m 05s', DIM)],
     ], PURPLE)
-    return [(('split', [], [run('[Clear All]')]), None), (running, None), (done, None)]
+    folded = ('frame', [
+        ('split', banner('SCOUT', '▸'), x),
+        ('split', [run('#19 · 2026-10-09 16:28', DIM)], [run('● ', GOLD, True), run('68K', GOLD)]),
+    ], PURPLE)
+    return [(('split', [], [run('[Clear All]')]), None), (running, None), (done, None), (folded, None)]
 
 
 DUNGEON_W = 46  # Dungeon is a tab of its own, wider than the pane
