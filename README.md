@@ -110,6 +110,8 @@ A saved combo shows in the Skill Box under **Party Combo**; pressed, it runs wit
 
 ## Dungeon
 
+<img src="docs/dungeon.png" width="420" alt="Dungeon: [Clear All] at the top; RUN_TEST #21 running, a half-turned gold coin and 96K, its Leader card leading with [Recall], its waves open: /demo-build and /demo-test done, /demo-check running with [X] and opened to Sonnet · general, /demo-archive done, then its condition; below it FAIL_PATH #20 done, a gold coin and 152K, its Leader card done with its report, its waves closed to 4/4 done · 1m 05s">
+
 A tab of its own that opens when a Party Combo is pressed, and follows each press as a mission until its leader has led it to the end. At a glance a mission is its line, its leader's card and one line for its waves; open the waves, then a step's card, for the detail. Each press gets a number, `#1`, `#2`, …; its prompt and each step's tag carry it (`[Run-Test #3 2.1]`), so combos pressed close together, or one combo pressed twice, keep their subagents apart.
 
 | What | Shows |

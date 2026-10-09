@@ -285,6 +285,58 @@ def setting_rows():
     ) + [(version(), None)]
 
 
+LILAC, GREEN, GOLD = (199, 125, 255), (56, 176, 0), (255, 210, 63)
+
+
+def card(fold, mark, color, title, word, extra=(), second=None):
+    """A Dungeon card: its head row (fold, mark, title; its state at the right)."""
+    head = ('split', ([run(f'{fold} ')] if fold else []) + [run(f'{mark} ', color), run(title, FG, True)],
+            [run(word, color)] + list(extra))
+    return ('frame', [head] + ([second] if second else []), color)
+
+
+def dungeon_rows():
+    """Dungeon's tab, as wide as DUNGEON_W: a mission running with its waves
+    open, and one done, closed to a glance."""
+    banner = lambda name: [run(f' {name} ', (255, 255, 255), True, PURPLE)]
+    x = [run('[', STOP), run('x'), run(']', STOP)]
+    btn = lambda label: [run(' [', DIM), run(label), run(']', DIM)]
+    running = ('frame', [
+        ('split', banner('RUN_TEST'), x),
+        ('split', [run('#21 · 2026-10-09 16:40', DIM)], [run('◐ ', GOLD, True), run('96K', GOLD)]),
+        card(None, '◆', LILAC, 'Leader', 'leading', btn('Recall'),
+             ('split', [run('  Sonnet', DIM)], [run('48s', DIM)])),
+        [run('▾ Waves'), run(' · 3 waves · 3/4 done · 1 running', DIM)],
+        ('indent', 2, [
+            [run('Wave 1', FG, True)],
+            card('▸', '✔', GREEN, '/demo-build', 'done'),
+            [run('  ↓', DIM)],
+            [run('Wave 2', FG, True)],
+            card('▸', '✔', GREEN, '/demo-test', 'done'),
+            [run('  ↓', DIM)],
+            [run('Wave 3', FG, True), run(' · all at once', DIM)],
+            card('▾', '◐', GOLD, '/demo-check', 'running', btn('X'),
+                 ('split', [run('  Sonnet · general', DIM)], [run('step 3 · 6s', DIM)])),
+            card('▸', '✔', GREEN, '/demo-archive', 'done'),
+            [run('◆ stop on pass, go on if fail', DIM)],
+        ]),
+    ], PURPLE)
+    done = ('frame', [
+        ('split', banner('FAIL_PATH'), x),
+        ('split', [run('#20 · 2026-10-09 16:32', DIM)], [run('● ', GOLD, True), run('152K', GOLD)]),
+        ('frame', [
+            ('split', [run('✔ ', GREEN), run('Leader', FG, True)], [run('done', GREEN)]),
+            ('split', [run('  Sonnet', DIM)], [run('1m 02s', DIM)]),
+            [run('  FAIL_PATH #20 finished. All four waves ran.', DIM)],
+        ], GREEN),
+        [run('▸ Waves'), run(' · 4 waves · 4/4 done · 1m 05s', DIM)],
+    ], PURPLE)
+    return [(('split', [], [run('[Clear All]')]), None), (running, None), (done, None)]
+
+
+DUNGEON_W = 46  # Dungeon is a tab of its own, wider than the pane
+
+
 def waiting_rows():
     return [(('scene',), None)]
 
@@ -464,3 +516,5 @@ render('tree', tree_rows(), None)
 render('party', party_rows(), None)
 render('events', events_rows(), None)
 render('setting', setting_rows(), None)
+W = DUNGEON_W
+render('dungeon', dungeon_rows(), None)
