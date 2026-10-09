@@ -102,15 +102,15 @@ Party Combos: your Skill Box skills chained into waves, each skill run by a suba
 | `Wave 1` … `▲ ▼ ✕` | Each wave is a rounded box; `▲ ▼` move it, `✕` removes it. |
 | `■ /skill  Haiku  general  ✕` | A skill in the wave, its swatch in its model's color. Press the model to cycle Haiku → Sonnet → Opus → Fable, the subagent type to cycle general → explore → plan (then your own agents from `.claude/agents/`), `✕` to take it out. In a narrow pane the model and type go on a second line. |
 | `+ skill` | Lists the Skill Box's skills not yet in the wave, side by side; each press adds one. |
-| `◆ + condition` | Between a wave and the next: what Claude should do with what came back, in your own words (`if Pass, report done; if Fail, run the debug wave`). Pressed, it opens a field. |
+| `◆ + condition` | Between a wave and the next: what the leader should do with what came back, in your own words (`if Pass, report done; if Fail, run the debug wave`). Pressed, it opens a field. |
 | `+ Wave` | Adds a wave at the end. |
 | `[Save]` / `[Delete]` | Edits stay a draft, so trying things never breaks a combo that works, until `[Save]` (green under the pointer) keeps them; empty waves are dropped then. `[Delete]` (red under the pointer) asks `[Delete [Y]/[N]]`. |
 
-A saved combo shows in the Skill Box under **Party Combo**. Explore and plan subagents only read, so a skill that writes files (a build, an archive) wants general.
+A saved combo shows in the Skill Box under **Party Combo**; pressed, it runs with the Skill Box's prompt as its input, and [Dungeon](#dungeon) opens on it. Explore and plan subagents only read, so a skill that writes files (a build, an archive) wants general. Combos pressed together run at the same time: two that write the same files (a test's results, say) can read each other's, so run those one after the other.
 
 ## Dungeon
 
-A tab of its own that opens when a Party Combo is pressed, and follows each press as a mission until its leader has led it to the end. Each press gets a number, `#1`, `#2`, …; its prompt and each step's tag carry it (`[Run-Test #3 2.1]`), so combos pressed close together, or one combo pressed twice, keep their subagents apart.
+A tab of its own that opens when a Party Combo is pressed, and follows each press as a mission until its leader has led it to the end. At a glance a mission is its line, its leader's card and one line for its waves; open the waves, then a step's card, for the detail. Each press gets a number, `#1`, `#2`, …; its prompt and each step's tag carry it (`[Run-Test #3 2.1]`), so combos pressed close together, or one combo pressed twice, keep their subagents apart.
 
 | What | Shows |
 | --- | --- |
