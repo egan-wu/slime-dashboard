@@ -1,13 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentStatus, EngineInterface, Register } from 'claude-code'
 
-import { ASK, bubbleCell, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, PERF_LEVELS, perfFrom, respawnLength, ROWS, setColors, setPerformance, slotOf, step } from './scene'
+import { ASK, bubbleCell, CAMPFIRE_W, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, PERF_LEVELS, perfFrom, respawnLength, ROWS, setColors, setPerformance, slotOf, step } from './scene'
 import type { Family, Perf, SlimeColors } from './scene'
 import type { Offsets } from './scene'
 import { addEvent, offsetOf, SHOWN_EVENTS, stamp } from './events'
 import type { SlimeEvent } from './events'
-import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
-import type { Tally } from './props'
+import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, clockText, compact, NO_TALLY, secondsText, totalTokens, ttlMs } from './props'
+import type { CacheTtl, Tally } from './props'
 import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
 import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
@@ -19,6 +19,9 @@ import type { Vitals } from './vitals'
 import { DEFAULT_ORDER, moveSection, orderFrom, SECTIONS } from './layout'
 import type { SectionId } from './layout'
 import { VERSION } from './version'
+import { cacheKept, returnVerdict, WARM_PROMPT, warmStep } from './warming'
+import { addToDay, dayKey, journalFrom, pingPays, READ_COST, rewriteCost, summaryOf } from './journal'
+import type { Day } from './journal'
 import { DEFAULT_WEATHER, parseWeather, WEATHER_URL, weatherNow } from './weather'
 import type { SlimeMinion, SlimeRecentSession, SlimeWeather } from '../types'
 
@@ -117,6 +120,8 @@ const comboDeleteAtom = atom({ plugin: 'slime-dashboard', key: 'comboDelete' } a
 const agentsAtom = atom({ plugin: 'slime-dashboard', key: 'agents' } as const, [] as string[])
 // The Property block: open or not, and the session's figures it shows.
 const propsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'propsOpen' } as const, false)
+// The Passive block (Cache Warming's switch): open or not.
+const passiveOpenAtom = atom({ plugin: 'slime-dashboard', key: 'passiveOpen' } as const, false)
 // The Setting block: open or not.
 const settingsOpenAtom = atom({ plugin: 'slime-dashboard', key: 'settingsOpen' } as const, false)
 // Setting's Display: whether its box is open, and the sections hidden from the
@@ -138,6 +143,74 @@ const unloadingAtom = atom({ plugin: 'slime-dashboard', key: 'unloading' } as co
 // True once GitHub's main is ahead of what this copy runs: a red ! before [Update].
 const behindAtom = atom({ plugin: 'slime-dashboard', key: 'behind' } as const, false)
 const tallyAtom = atom({ plugin: 'slime-dashboard', key: 'tally' } as const, NO_TALLY as Tally)
+// The prompt cache's TTL, and when the main thread last sent a request (its
+// cache then runs until cacheAt + TTL).
+const cacheTtlAtom = atom({ plugin: 'slime-dashboard', key: 'cacheTtl' } as const, { ttl: '1h', from: 'auto' } as CacheTtl)
+const cacheAtAtom = atom({ plugin: 'slime-dashboard', key: 'cacheAt' } as const, 0)
+// The Journal: thirty days of records (kept in the store), and whether it is open.
+const journalAtom = atom({ plugin: 'slime-dashboard', key: 'journal' } as const, [] as Day[])
+const journalOpenAtom = atom({ plugin: 'slime-dashboard', key: 'journalOpen' } as const, false)
+// The Journal's Cache Warming block, opened and closed on its own.
+const journalWarmOpenAtom = atom({ plugin: 'slime-dashboard', key: 'journalWarmOpen' } as const, false)
+const JOURNAL_KEY = 'journal'
+// Cache Warming's switch while on: a deep amber ground, which the
+// terminal's light text reads well on; bold and brighter under the pointer.
+const WARM_LIT = { ground: '#9c5d12', text: '#ffe7b0' } as const
+// Cache Warming: on or off. On, it rests (sends nothing) once keeping
+// the cache stops paying, until the next turn starts a new idle stretch.
+const warmAutoAtom = atom({ plugin: 'slime-dashboard', key: 'warmAuto' } as const, true)
+// What a cold return still read from the cache (the system prompt and tools,
+// kept warm apart), which a rescue does not save; the last one seen.
+const WARM_SHARED_KEY = 'warmShared'
+let warmAuto = true
+let warmRest = false
+let warmBusy = false
+let warmShared = 0
+let warmTtl: '5m' | '1h' = '5m'
+// The main thread's last prefix, kept through a reload of the plugin so the
+// fire is lit again without waiting for another turn.
+const warmPrefixAtom = atom({ plugin: 'slime-dashboard', key: 'warmPrefix' } as const, 0)
+// For the Journal and warming's break-even: when the main thread's last
+// request ended, its prefix's size, and the pings sent since (what they read).
+let lastRealAt = 0
+let lastPrefix = 0
+let streakPings = 0
+let streakSpent = 0
+// Whether warming is keeping the cache now: on Auto, not resting, and worth a
+// ping for what the last turn left (the campfire burns while it is).
+const warmingNow = () => warmAuto && !warmRest && lastPrefix > 0 && pingPays(streakSpent, lastPrefix, warmTtl, warmShared)
+// Where the campfire stands, in the ground's own coordinates (off.rock, which
+// goo and rocks scroll by): lit beside the slime once the troop rests with warming
+// on; it stays while they rest and slides off to the left when they set out.
+let campAt: number | undefined
+// The column the last animation frame drew the fire at, so a redraw of the
+// whole pane between frames draws it in the same place.
+let campShown: number | undefined
+// The tick the fire was set on, for the lighting (a log, then a flame).
+let campLit = 0
+const CAMP_GAP = 2
+// Once warming rests (keeping the cache no longer pays), a fire already lit
+// burns down to embers, still on Auto; none is lit for it.
+const embersNow = () => warmAuto && warmRest && campAt !== undefined
+function campColumn(w: number, resting: boolean): number | undefined {
+  if (!warmingNow() && !embersNow()) return (campAt = undefined)
+  // Lit just in front of the resting slime: two pixels clear of its left side.
+  if (campAt === undefined && resting && warmingNow()) {
+    campAt = Math.floor(off.rock) + homeCx(w) - 3 - CAMP_GAP - CAMPFIRE_W
+    campLit = tick
+  }
+  if (campAt === undefined) return undefined
+  const x = campAt - Math.floor(off.rock)
+  if (x + CAMPFIRE_W <= 0) return (campAt = undefined)
+  return x
+}
+// The warming loop's own timer, a beat every 15 seconds while it is on.
+let warmTimer: { cancel: () => void } | undefined
+const WARM_BEAT_MS = 15_000
+const startWarmTimer = ($: EngineInterface) => {
+  warmTimer?.cancel()
+  warmTimer = $.clock.every(WARM_BEAT_MS, () => void warmBeat($))
+}
 // The model requests of the main loop's current (or last) turn.
 const iterationAtom = atom({ plugin: 'slime-dashboard', key: 'iteration' } as const, 0)
 // The main loop's reasoning effort as its last model request was sent ('' before one).
@@ -196,6 +269,132 @@ async function readSessionTitle($: EngineInterface) {
   if (run?.exitCode !== 0) return
   const named = titleFrom(run.stdout)
   if (named) await setSessionTitle($, named)
+}
+
+// The cache TTL as Claude Code settles it: the environment, then the
+// settings files nearest first (local, project, user), then the plan.
+async function refreshCacheTtl($: EngineInterface) {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${await $.env.get('HOME')}/.claude`
+  const cwd = await $.session.cwd()
+  const files = [`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${configDir}/settings.json`]
+  const settings = await Promise.all(
+    files.map(async f => {
+      try {
+        return JSON.parse(await $.fs.read(f)) as unknown
+      } catch {
+        return undefined
+      }
+    }),
+  )
+  const v = await read($, vitalsAtom)
+  const ttl = cacheTtlOf(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'), settings, v.plan, isDown(v))
+  await update($, cacheTtlAtom, () => ttl)
+  warmTtl = ttl.ttl
+}
+
+// Today's Journal record with `delta` added, made to what the store holds
+// now so windows open at once each add their own.
+async function addJournal($: EngineInterface, delta: Partial<Omit<Day, 'day'>>) {
+  const day = dayKey(await $.clock.now(), tzOffset ?? 0)
+  const list = addToDay(journalFrom(await $.store.get(JOURNAL_KEY)), day, delta)
+  await $.store.set(JOURNAL_KEY, list)
+  await update($, journalAtom, () => list)
+}
+
+// The first request of a main-thread turn: a return after the cache would
+// have lapsed is a rescue when warming kept it (a large read), else a cold
+// start (it wrote the prefix afresh). Either way the warming streak ends.
+async function firstStep($: EngineInterface, usage: { input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }) {
+  const now = await $.clock.now()
+  const ttl = (await read($, cacheTtlAtom)).ttl
+  if (lastRealAt > 0) {
+    const gap = now - lastRealAt
+    const readTokens = usage.cache_read_input_tokens
+    const verdict = returnVerdict(gap, ttlMs(ttl), readTokens, lastPrefix, streakPings)
+    const idle = `${Math.round(gap / 60_000)}m idle`
+    if (verdict === 'rescued') {
+      await addJournal($, { rescues: 1, rescued: readTokens, saved: readTokens * (rewriteCost(ttl) - READ_COST) })
+      await logEvent($, `♨ Cache rescued: ${compact(readTokens)} still warm after ${idle}`)
+    } else if (gap > ttlMs(ttl) && !cacheKept(readTokens, lastPrefix)) {
+      warmShared = readTokens
+      await $.store.set(WARM_SHARED_KEY, readTokens)
+      await addJournal($, { cold: 1, coldTokens: usage.cache_creation_input_tokens })
+      const why = verdict === 'lapsed' ? `lapsed despite ${streakPings} ping${streakPings === 1 ? '' : 's'}` : 'cold'
+      await logEvent($, `♨ Cache ${why}: rewrote ${compact(usage.cache_creation_input_tokens)} after ${idle}`)
+    }
+  }
+  streakPings = 0
+  streakSpent = 0
+  warmRest = false
+}
+
+// Cache Warming's switch: on or off.
+async function toggleWarm($: EngineInterface) {
+  warmAuto = !warmAuto
+  await update($, warmAutoAtom, () => warmAuto)
+  if (warmAuto) {
+    warmRest = false
+    startWarmTimer($)
+  } else {
+    warmTimer?.cancel()
+    warmTimer = undefined
+  }
+  await logEvent($, `♨ Cache Warming ${warmAuto ? 'on' : 'off'}`)
+}
+
+// Warming rests until the next turn: keeping this cache no longer pays, or
+// there is none to keep.
+async function restWarm($: EngineInterface, why: string) {
+  if (warmRest) return
+  warmRest = true
+  if (streakPings > 0) await logEvent($, `♨ Cache Warming rests: ${why}`)
+}
+
+// Each beat of the warming loop: while on and idle (no turn running, no
+// subagent at work, no question waiting), a fork goes out a little before the
+// cache would lapse. Its prefix is read from the cache, which starts the
+// cache's time over; nothing joins the conversation. It stops once its span
+// is over, when a limit runs out, and when the cache turns out gone already.
+async function warmBeat($: EngineInterface) {
+  if (!warmAuto || warmRest || warmBusy) return
+  if (isDown(vitals)) return restWarm($, 'out of HP/MP')
+  const now = await $.clock.now()
+  const idle = !moving(busy, minions) && !waiting && !unloading
+  const ttl = ttlMs((await read($, cacheTtlAtom)).ttl)
+  const next = warmStep(now, idle, await read($, cacheAtAtom), ttl)
+  if (next.kind !== 'warm') return
+  // Too little to keep, or past break-even: another ping would cost more
+  // than coming back could save.
+  if (!pingPays(streakSpent, lastPrefix, warmTtl, warmShared)) {
+    return restWarm($, streakPings === 0 ? 'too little to keep warm' : 'more pings would cost more than they save')
+  }
+  warmBusy = true
+  try {
+    const r = await $.model.fork({ prompt: WARM_PROMPT })
+    if (!r.isAnswered && r.reason === 'nothing-to-fork') return await restWarm($, 'no conversation to keep warm')
+    const readTokens = r.usage?.cache_read_input_tokens ?? 0
+    const writeTokens = r.usage?.cache_creation_input_tokens ?? 0
+    const at = await $.clock.now()
+    if (!r.isAnswered && readTokens === 0) {
+      await logEvent($, `♨ Cache Warming: no reply (${r.reason}), trying again`)
+      return
+    }
+    if (!cacheKept(readTokens, lastPrefix)) return await restWarm($, 'the cache had already lapsed')
+    await update($, cacheAtAtom, () => at)
+    await update($, tallyAtom, t => addUsage(t, r.usage!))
+    streakPings++
+    streakSpent += readTokens
+    lastPrefix = Math.max(lastPrefix, readTokens)
+    const w = rewriteCost((await read($, cacheTtlAtom)).ttl)
+    await addJournal($, { pings: 1, pingRead: readTokens, saved: -(readTokens * READ_COST + writeTokens * w) })
+    const nextAt = clockText(at + ttl, tzOffset ?? 0)
+    await logEvent($, `♨ Cache warmed: ${compact(readTokens)} read, next by ${nextAt}`)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await logEvent($, `♨ Cache Warming: ${message}`)
+  } finally {
+    warmBusy = false
+  }
 }
 
 // The project's transcripts, where readSessionTitle reads this session's.
@@ -271,6 +470,7 @@ async function pressSign($: EngineInterface) {
 // slime leaping away and a new one coming down in a beam of light.
 async function respawn($: EngineInterface) {
   await update($, respawnConfirmAtom, () => false)
+  await restWarm($, 'a new session')
   $.ui.toast('Skill Box: sending /clear')
   try {
     await $.command.run({ command: 'clear', args: '' })
@@ -527,6 +727,8 @@ async function refreshModel($: EngineInterface) {
   const current = await $.session.model()
   if (!current || current === model) return
   if (model !== '') await logEvent($, `Model: ${modelInfo(model).name} → ${modelInfo(current).name}`)
+  // Another model has a cache of its own: nothing left to keep warm.
+  if (model !== '') await restWarm($, 'the model changed')
   model = current
   await update($, modelAtom, () => current)
 }
@@ -883,6 +1085,14 @@ export const register: Register = on => {
     vitals = await read($, vitalsAtom)
     await refreshModel($)
     await refreshVitals($)
+    await refreshCacheTtl($).catch(() => {})
+    warmAuto = await read($, warmAutoAtom)
+    lastPrefix = await read($, warmPrefixAtom)
+    const sharedKept = await $.store.get(WARM_SHARED_KEY)
+    if (typeof sharedKept === 'number' && sharedKept >= 0) warmShared = sharedKept
+    const journalKept = journalFrom(await $.store.get(JOURNAL_KEY))
+    await update($, journalAtom, () => journalKept)
+    if (warmAuto) startWarmTimer($)
     const widthKept = await $.store.get(WIDTH_KEY)
     if (typeof widthKept === 'number' && Number.isInteger(widthKept)) {
       await update($, widthAtom, () => Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, widthKept)))
@@ -923,7 +1133,8 @@ export const register: Register = on => {
       if (columns > 0) {
         const walking = moving(busy, minions)
         if ((respawnTick() ?? 0) >= respawnLength(columns)) respawnAt = undefined
-        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting, unloading, respawn: respawnTick() }
+        const camp = (campShown = campColumn(columns, !walking && respawnAt === undefined))
+        const face = { ...faceOf(vitals, walking && !waiting), ask: waiting, unloading, respawn: respawnTick(), warming: warmingNow(), embers: embersNow(), camp, campAge: tick - campLit }
         const cells = frame(columns, off, tick, walking, model, followersOf(minions), weather, t, face)
         await $.ui.blit({ requestId: PANE, key: SCENE, cells })
       }
@@ -1022,7 +1233,20 @@ export const register: Register = on => {
       await setWaiting($, false).catch(() => {})
     }
 
-    return yield* next(e)
+    const result = yield* next(e)
+    // Each main-thread request leaves the cache fresh until now + TTL.
+    if (e.agentId === undefined && result.usage) {
+      const u = result.usage
+      try {
+        if (e.index === 0) await firstStep($, u)
+        const at = await $.clock.now()
+        lastRealAt = at
+        lastPrefix = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+        await update($, warmPrefixAtom, () => lastPrefix)
+        await update($, cacheAtAtom, () => at)
+      } catch {}
+    }
+    return result
   })
 
   // A question put to the person, or a plan to approve: waiting until answered.
@@ -1051,13 +1275,30 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.usage) await update($, tallyAtom, t => addUsage(t, e.usage!)).catch(() => {})
+    if (e.usage) {
+      const u = e.usage
+      await addJournal($, {
+        turns: e.agentId === undefined ? 1 : 0,
+        input: u.input_tokens,
+        cacheWrite: u.cache_creation_input_tokens,
+        cacheRead: u.cache_read_input_tokens,
+        output: u.output_tokens,
+      }).catch(() => {})
+    }
     if (e.agentId === undefined) {
       void readSessionTitle($).catch(() => {})
       await setBusy($, false)
       await setWaiting($, false)
       await update($, lastTurnMsAtom, () => e.durationMs)
       await update($, turnStartedAtAtom, () => 0)
+      const at = await $.clock.now()
+      await update($, cacheAtAtom, () => at)
       await refreshVitals($)
+      await refreshCacheTtl($).catch(() => {})
+      // A new idle stretch: on Auto the loop runs, from the first turn on,
+      // and keeps this turn's cache if that pays.
+      warmRest = false
+      if (warmAuto && !warmTimer) startWarmTimer($)
     }
 
     return next(e)
@@ -1388,6 +1629,35 @@ export const register: Register = on => {
     const lastMs = await read($, lastTurnMsAtom)
     const hit = cacheHitRate(tally)
     const timerMs = startedAt > 0 ? (await $.clock.now()) - startedAt : lastMs
+    const cacheTtl = await read($, cacheTtlAtom)
+    const cacheAt = await read($, cacheAtAtom)
+    const warmOn = await read($, warmAutoAtom)
+    // Passive: Cache Warming's switch, in a block that opens and closes; lit
+    // on an amber ground while on and dim while off; a dim word after it says
+    // what warming is doing now.
+    const warmNow = warmingNow()
+    const warmWord = !warmOn ? 'off' : warmNow ? `${compact(lastPrefix)} warm` : embersNow() ? 'resting' : 'waiting'
+    const passiveOpen = await read($, passiveOpenAtom)
+    const passive = (
+      <Box flexDirection="column">
+        {rule}
+        {header('Passive', 'passive-toggle', passiveOpen, () => update($, passiveOpenAtom, o => !o))}
+        {passiveOpen && (
+          <Box flexDirection="row" columnGap={1} marginLeft={1}>
+            {/* `[ Cache Warming ]`: the brackets stay as they are; inside, lit
+                on an amber ground while on, dim while off. */}
+            <Box key="warm-switch" flexDirection="row" flexShrink={0}>
+              <Text>[</Text>
+              <Box flexDirection="row" {...(warmOn ? { backgroundColor: WARM_LIT.ground } : {})}>
+                <Button key="warm" label=" Cache Warming " plain dimColor={!warmOn} {...(warmOn ? { hover: { scope: 'warm', color: WARM_LIT.text, bold: true } } : {})} onPress={() => toggleWarm($)} />
+              </Box>
+              <Text>]</Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">{warmWord}</Text>
+          </Box>
+        )}
+      </Box>
+    )
     const property = (
       <Box flexDirection="column">
         {rule}
@@ -1445,6 +1715,7 @@ export const register: Register = on => {
               </Box>
             )}
             <Text>{` Cache Hit Rate: ${hit === undefined ? '—' : `${hit.toFixed(1)}%`}`}</Text>
+            <Text>{` Cache TTL: ${cacheTtl.ttl}${cacheTtl.from === 'auto' ? ' (auto)' : cacheTtl.from === 'env' ? ' (env)' : ''}`}</Text>
             <Text>{` Token Usage: ${compact(totalTokens(tally))}`}</Text>
             <Text>{` Iteration Rate: ${iteration}/∞`}</Text>
             <Text>{` Latest Command: ${secondsText(timerMs)}`}</Text>
@@ -1887,14 +2158,66 @@ export const register: Register = on => {
         )}
       </Box>
     )
-    const rest = { session, stats, models: picker, property, skills: skillBox, tree, monitor, events: eventMessage }
+    // Journal: the last thirty days, from the records the store keeps.
+    const journalOpen = await read($, journalOpenAtom)
+    const journal = await read($, journalAtom)
+    const today = dayKey(journalOpen ? await $.clock.now().catch(() => 0) : 0, tzOffset ?? 0)
+    const sum = summaryOf(journal, today)
+    const warmBlockOpen = await read($, journalWarmOpenAtom)
+    // Inside the block's border and padding.
+    const spark = sum.spark.slice(-Math.max(12, (columns || OPEN.columns) - 1 - 4))
+    const cacheEnd = journalOpen && warmBlockOpen ? cacheEndText(cacheAt, cacheTtl.ttl, cacheAt > 0 ? await $.clock.now() : 0, tzOffset ?? 0) : ''
+    const warmToggle = (
+      <Button
+        key="journal-warm"
+        label={warmBlockOpen ? '▼ Cache Warming' : '▸ Cache Warming'}
+        plain
+        onPress={() => update($, journalWarmOpenAtom, o => !o)}
+      />
+    )
+    // A block of its own, as the Skill Box's categories: closed, its button
+    // alone; open, a rounded box with the button at its top. Other blocks
+    // can follow it.
+    const warmBlock = warmBlockOpen ? (
+      <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
+        {warmToggle}
+        {/* This session's cache, then the thirty days'. */}
+        <Text>{`Cache Read: ${compact(tally.cacheRead)}`}</Text>
+        <Text>{`Cache Write: ${compact(tally.cacheWrite)}`}</Text>
+        <Text>{`Cache Expires: ${cacheEnd}`}</Text>
+        <Text>{`Cache Hit Rate: ${sum.hitRate === undefined ? '—' : `${sum.hitRate.toFixed(1)}%`}`}</Text>
+        {/* A day a bar, up to thirty as the box has room for, today last; a
+            dot where there is no record. */}
+        <Text dimColor wrap="truncate-end">{spark}</Text>
+        <Text dimColor wrap="truncate-end">{`${spark.length}d ago${' '.repeat(Math.max(1, spark.length - `${spark.length}d ago`.length - 'today'.length))}today`}</Text>
+        <Text>{`Cold Starts: ${sum.cold}${sum.cold > 0 ? ` (${compact(sum.coldTokens)})` : ''}`}</Text>
+        <Text>{`Pings: ${sum.pings} · Rescues: ${sum.rescues}`}</Text>
+        <Text>{`Saved: ${sum.saved < 0 ? '-' : ''}${compact(Math.round(Math.abs(sum.saved)))}`}</Text>
+      </Box>
+    ) : (
+      <Box flexDirection="row" marginLeft={2}>
+        {warmToggle}
+      </Box>
+    )
+    const journalBlock = (
+      <Box flexDirection="column">
+        {rule}
+        {header('Journal', 'journal-toggle', journalOpen, () => update($, journalOpenAtom, o => !o))}
+        {journalOpen && (
+          <Box flexDirection="column">
+            {warmBlock}
+          </Box>
+        )}
+      </Box>
+    )
+    const rest = { session, stats, models: picker, passive, property, skills: skillBox, tree, monitor, events: eventMessage, journal: journalBlock }
 
     if (e.surface === 'terminal') {
       const { Raster } = $.ui.resolve(e)
       columns = Math.max(1, Math.min(512, e.props.bodyColumns))
       const scene = (
         <Box flexDirection="column">
-          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading, respawn: respawnTick() })} />
+          <Raster key={SCENE} columns={columns} rows={ROWS} cells={frame(columns, off, tick, isBusy, current, followersOf(followers), sky, partyTick(), { ...faceOf(v, isBusy && !isWaiting), ask: isWaiting, unloading: isUnloading, respawn: respawnTick(), warming: warmingNow(), embers: embersNow(), camp: warmingNow() || embersNow() ? campShown : undefined, campAge: tick - campLit })} />
           {isWaiting && (
             // The bubble's question mark, bold, laid over its middle cell.
             <Box key="ask" position="absolute" top={bubbleCell(columns).row} left={bubbleCell(columns).col}>

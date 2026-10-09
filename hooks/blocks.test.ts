@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { addUsage, cacheHitRate, compact, NO_TALLY, secondsText, totalTokens } from './props'
+import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, compact, NO_TALLY, secondsText, totalTokens } from './props'
 import { addEvent, offsetOf, stamp } from './events'
 import { ASK, frame, ROWS } from './scene'
 import { grouped, parseAdd, skillsFrom } from './skills'
@@ -21,6 +21,20 @@ const PANE = {
     view: {},
   },
 }
+
+test('cache TTL: the environment, then the nearest setting, else an hour on a subscription within its limits', () => {
+  expect(cacheTtlOf('5m', [{ promptCacheTtl: '1h' }], 'subscription', false)).toEqual({ ttl: '5m', from: 'env' })
+  expect(cacheTtlOf(undefined, [undefined, { promptCacheTtl: '5m' }, { promptCacheTtl: '1h' }], 'subscription', false)).toEqual({ ttl: '5m', from: 'setting' })
+  expect(cacheTtlOf('', [{}], 'subscription', false)).toEqual({ ttl: '1h', from: 'auto' })
+  expect(cacheTtlOf(undefined, [], 'subscription', true)).toEqual({ ttl: '5m', from: 'auto' })
+  expect(cacheTtlOf(undefined, [], 'api', false)).toEqual({ ttl: '5m', from: 'auto' })
+  // Ends an hour after the last request, in local time, with what is left.
+  const at = Date.UTC(2026, 9, 9, 13, 32)
+  expect(cacheEndText(at, '1h', at + 8 * 60_000, 0)).toBe('14:32 · 52m')
+  expect(cacheEndText(at, '5m', at + 260_000, 3_600_000)).toBe('14:37 · 40s')
+  expect(cacheEndText(at, '5m', at + 300_000, 0)).toBe('expired')
+  expect(cacheEndText(0, '1h', at, 0)).toBe('—')
+})
 
 test('cache hit rate and accumulated tokens add up over turns', async () => {
   const one = { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 200, cache_read_input_tokens: 700 }
@@ -481,12 +495,12 @@ test('Setting: Color cycles a family through six colors; Default puts them back'
 test('Order: a kept order is cleaned up, and a move swaps neighbors', () => {
   expect(orderFrom(undefined)).toEqual(DEFAULT_ORDER)
   // Unknown and repeated ids dropped; the missing ones back at the end.
-  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['session', 'events', 'scene', 'models', 'property', 'skills', 'tree', 'monitor', 'stats'])
+  expect(orderFrom(['events', 'nope', 'events', 'stats', 3])).toEqual(['session', 'events', 'scene', 'models', 'passive', 'property', 'skills', 'tree', 'monitor', 'stats', 'journal'])
   // A section added since the order was kept goes in at its default place.
   expect(orderFrom(DEFAULT_ORDER.filter(id => id !== 'session'))).toEqual(DEFAULT_ORDER)
   expect(moveSection(DEFAULT_ORDER, 'scene', -1).slice(1, 3)).toEqual(['scene', 'stats'])
   expect(moveSection(DEFAULT_ORDER, 'session', -1)).toEqual(DEFAULT_ORDER)
-  expect(moveSection(DEFAULT_ORDER, 'events', 1)).toEqual(DEFAULT_ORDER)
+  expect(moveSection(DEFAULT_ORDER, 'journal', 1)).toEqual(DEFAULT_ORDER)
 })
 
 test('Setting: Order moves sections up and down; Default puts them back', async ($, on) => {

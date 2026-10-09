@@ -51,10 +51,12 @@ def scenes():
                 f.write(text)
         with open(os.path.join(tmp, 'cells.ts'), 'w') as f:
             f.write("""
-import { frame, ROWS, setLoop } from './scene.ts'
+import { CAMPFIRE_W, frame, homeCx, ROWS, setLoop } from './scene.ts'
 const W = %d
 const decode = (b64: string) => { const b = Buffer.from(b64, 'base64'); const u = new Uint32Array(b.buffer, b.byteOffset, b.length / 4); return Array.from({ length: ROWS }, (_, r) => Array.from(u.slice(r * W * 3, (r + 1) * W * 3))) }
 const off = (n: number) => ({ cloud: 23 + n, bird: 40, tree: 52 + n, rock: 31 + n, ground: 9 })
+// Where register.tsx lights the campfire: two pixels clear of the resting slime.
+const CAMP = homeCx(W) - 3 - 2 - CAMPFIRE_W
 const troop = [{ model: 'claude-haiku-5-5', pos: 0 }, { model: 'claude-sonnet-5-5', pos: 1 }]
 // The walk, frame by frame at ten a second, made to loop: the road repeats
 // every LOOP pixels and the walk covers exactly one, while the clouds and
@@ -71,6 +73,8 @@ console.log(JSON.stringify({
   walkingFrames,
   asleep: decode(frame(W, off(0), 7, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' })),
   waiting: decode(frame(W, off(5), 0, true, 'claude-opus-5-5', troop, { day: true, sky: 'partly' }, undefined, { ask: true })),
+  campfire: decode(frame(W, off(2), 41, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' }, undefined, { warming: true, camp: CAMP, campAge: 100 })),
+  embers: decode(frame(W, off(2), 43, false, 'claude-opus-5-5', [], { day: false, sky: 'clear' }, undefined, { embers: true, camp: CAMP })),
 }))
 """ % (W, GIF_FRAMES))
         out = subprocess.run(['node', '--experimental-strip-types', '--no-warnings', 'cells.ts'],
@@ -156,10 +160,36 @@ def property_rows():
         [run(' Effort: '), run('[High]')],
         [run(' '), run('[Low]', DIM), run('[Mid]', DIM), run('[High]'), run('[xHigh]', DIM), run('[Max]', DIM)],
         [run(' Cache Hit Rate: 91.4%')],
+        [run(' Cache TTL: 1h (auto)')],
         [run(' Token Usage: 1.84M')],
         [run(' Iteration Rate: 7/∞')],
         [run(' Latest Command: 48.2s')],
     )
+
+
+WARM_GROUND = (156, 93, 18)  # Passive's switch, lit
+
+
+def passive_rows():
+    switch = [run('['), run(' Cache Warming ', FG, False, WARM_GROUND), run(']')]
+    return section('Passive', [run(' ')] + switch + [run(' 74.3k warm', DIM)])
+
+
+def journal_rows():
+    spark = '·▅▆▆▇·▆▇▇▆··▇▇█▇▆··▆▇▇▇▆·▇██'  # the box's 28 columns, today last
+    block = ('frame', [
+        [run('▼ Cache Warming')],
+        [run('Cache Read: 1.62M')],
+        [run('Cache Write: 74.3k')],
+        [run('Cache Expires: 14:32 · 52m')],
+        [run('Cache Hit Rate: 93.8%')],
+        [run(spark, DIM)],
+        [run('28d ago' + ' ' * (len(spark) - 12) + 'today', DIM)],
+        [run('Cold Starts: 4 (296.1k)')],
+        [run('Pings: 23 · Rescues: 6')],
+        [run('Saved: 312.4k')],
+    ], BORDER)
+    return section('Journal', block)
 
 
 def skills_rows():
@@ -405,6 +435,10 @@ for old in ('session',):
     if os.path.exists(os.path.join(DOCS, f'{old}.png')):
         os.remove(os.path.join(DOCS, f'{old}.png'))
 render('property', property_rows(), None)
+render('campfire', [(('scene',), None)], cells['campfire'])
+render('embers', [(('scene',), None)], cells['embers'])
+render('passive', passive_rows(), None)
+render('journal', journal_rows(), None)
 render('skills', skills_rows(), None)
 render('tree', tree_rows(), None)
 render('party', party_rows(), None)

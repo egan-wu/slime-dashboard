@@ -45,6 +45,23 @@ The sign is also a button. Pressed, it opens a field under it; type a new name, 
 | <img src="docs/asleep.png" width="340" alt="Night: the slime asleep under the moon and stars, zZ above it"> | <img src="docs/waiting.png" width="340" alt="The troop stopped and a speech bubble with a bold question mark over the main slime"> |
 | Once the turn ends it falls asleep while the clouds and birds drift on. | A permission prompt or a question is open: the troop stops and a bubble with a bold `?` flashes over the slime until you answer. |
 
+## Passive
+
+<img src="docs/passive.png" width="340" alt="Passive open: [ Cache Warming ] lit on an amber ground, 74.3k warm after it">
+
+**Cache Warming** keeps the prompt cache alive while you are away. Claude Code caches the conversation for a while after each request (an hour on a Pro or Max subscription, five minutes on an API key); come back after that and the whole context is written to the cache again, at 1.25× the input price for the five-minute cache or 2× for the hour one, where reading it costs 0.1×. While the session sits idle, Cache Warming sends a one-word request forked from the conversation a little before the cache would lapse: it reads the cache, which starts its time over, and nothing joins the conversation.
+
+It sends only while that pays. Each ping reads the context at 0.1×; once the pings since your last prompt would cost more than coming back to a lapsed cache, it rests until your next prompt. A 74k context is kept about seven pings; one under about 28k (little beyond the system prompt and tools, which stay cached anyway) is not kept at all. It also rests when the cache has lapsed already, the model changes, a new session starts, or HP or MP runs out. Pings count toward your usage limits like any request.
+
+| Button | What it does |
+| --- | --- |
+| `[ Cache Warming ]` | On (the default) or off, kept across sessions: lit on an amber ground while on, dim while off. The dim word after it says what it is doing: `74.3k warm` (keeping that much), `resting` (not worth it now), `waiting` (for a prompt), or `off`. |
+
+| Warming | Resting |
+| --- | --- |
+| <img src="docs/campfire.png" width="340" alt="Night: a campfire burning beside the red slime, awake"> | <img src="docs/embers.png" width="340" alt="Night: the fire burnt down to glowing logs, a puff of smoke above, the slime asleep beside it"> |
+| When a turn ends and warming is keeping the cache, the slime spits a log, then a flame, and stays awake by the fire. | Once more pings would not pay, the fire burns down to embers and smoke, and the slime falls asleep beside them. |
+
 ## Property
 
 <img src="docs/property.png" width="340" alt="Property open: Model [Opus 5.5], Effort [High] with its row of levels, then cache hit rate, tokens, iterations and the latest turn's time">
@@ -54,7 +71,7 @@ The sign is also a button. Pressed, it opens a field under it; type a new name, 
 | Model `[Opus 5.5]` | Opens a row `[Haiku][Sonnet][Opus][Fable]`, the current one bright; picking one runs `/model`. |
 | Effort `[High]` | Opens the row of levels `[Low][Mid][High][xHigh][Max]`; picking one runs `/effort` with it and closes the row. |
 
-Below them: the cache hit rate, the tokens used, the iterations, and the latest turn's time.
+Below them: the cache hit rate, the cache's time to live (`1h` or `5m`: `(env)` when `CLAUDE_CODE_PROMPT_CACHE_TTL` sets it, none when a settings file's `promptCacheTtl` does, `(auto)` otherwise), the tokens used, the iterations, and the latest turn's time.
 
 ## Skill Box
 
@@ -101,7 +118,20 @@ The subagents at work, each its model in its color and the few words its task wa
 
 <img src="docs/events.png" width="340" alt="Event Message open: three framed events, a subagent finished, one stopped and one started">
 
-The newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started, finished or stopped, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, a respawn, a rename, an update. Twenty are kept.
+The newest three events, each framed, with this computer's local time (`YYYYMMDD-hhmm`) above a summary: a subagent started, finished or stopped, a question waiting or answered, out of HP/MP or back, the model or effort switched, a skill sent, the context compacted, a respawn, a rename, an update, and Cache Warming's doings (`♨ Cache warmed`, `rescued`, `cold`, `rests`). Twenty are kept.
+
+## Journal
+
+<img src="docs/journal.png" width="340" alt="Journal open: the Cache Warming block with this session's cache read and write, when it expires, and thirty days' hit rate, cold starts, pings, rescues and tokens saved">
+
+What the cache did, kept on this computer for thirty days across sessions. `▼ Cache Warming` opens or closes its block:
+
+- **Cache Read / Write**: this session's tokens read from and written to the cache.
+- **Cache Expires**: when the cache the last request left runs out, in this computer's time, and how long until then.
+- **Cache Hit Rate** over the days, then a bar a day (as many as the box has room for, today last; `·` for a day with no record).
+- **Cold Starts**: prompts that came back to a lapsed cache and wrote the context afresh, and how much.
+- **Pings · Rescues**: the requests Cache Warming sent, and the prompts that found the cache still warm thanks to them.
+- **Saved**: what rescues saved less what pings cost, in input tokens at full price.
 
 ## Setting
 
@@ -110,7 +140,7 @@ The newest three events, each framed, with this computer's local time (`YYYYMMDD
 | Button | What it does |
 | --- | --- |
 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked each time the dashboard loads: at session start and at each reload). |
-| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Property, Skill Box, Skill Tree, Party, Event Message); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
+| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Passive, Property, Skill Box, Skill Tree, Party, Event Message, Journal); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and Party, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
