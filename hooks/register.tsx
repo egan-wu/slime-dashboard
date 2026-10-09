@@ -181,7 +181,8 @@ let streakSpent = 0
 const warmingNow = () => warmAuto && !warmRest && lastPrefix > 0 && pingPays(streakSpent, lastPrefix, warmTtl, warmShared)
 // Where the campfire stands, in the ground's own coordinates (off.rock, which
 // goo and rocks scroll by): lit beside the slime once the troop rests with warming
-// on; it stays while they rest and slides off to the left when they set out.
+// on; it stays while they rest, slides off to the left when they set out,
+// and is lit anew beside them when they rest again.
 let campAt: number | undefined
 // The column the last animation frame drew the fire at, so a redraw of the
 // whole pane between frames draws it in the same place.
@@ -195,9 +196,16 @@ const embersNow = () => warmAuto && warmRest && campAt !== undefined
 function campColumn(w: number, resting: boolean): number | undefined {
   if (!warmingNow() && !embersNow()) return (campAt = undefined)
   // Lit just in front of the resting slime: two pixels clear of its left side.
-  if (campAt === undefined && resting && warmingNow()) {
-    campAt = Math.floor(off.rock) + homeCx(w) - 3 - CAMP_GAP - CAMPFIRE_W
-    campLit = tick
+  // A fire left behind (the troop traveled on, or the pane changed width) is
+  // lit anew there once it rests; embers are only moved.
+  const spot = Math.floor(off.rock) + homeCx(w) - 3 - CAMP_GAP - CAMPFIRE_W
+  if (resting && campAt !== spot) {
+    if (warmingNow()) {
+      campAt = spot
+      campLit = tick
+    } else if (campAt !== undefined) {
+      campAt = spot
+    }
   }
   if (campAt === undefined) return undefined
   const x = campAt - Math.floor(off.rock)
