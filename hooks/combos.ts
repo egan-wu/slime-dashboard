@@ -142,7 +142,9 @@ export function comboPrompt(combo: Combo, input: string, mission?: number, subag
   const lines = [
     `Run the Party Combo "${combo.name}"${mission === undefined ? '' : ` (mission #${mission})`}. You lead it: hand each step below to a subagent with the Agent tool, with exactly the model and subagent_type it names, and do not do a step's work yourself.`,
     'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and whatever earlier steps found that it needs.' +
-      (subagent ? ' However the Agent tool runs them, wait for every report of a wave before you go on.' : ''),
+      (subagent
+        ? ' However the Agent tool runs them, wait for every report of a wave before you go on. A step the person stopped is not run again: take it as failed, and judge the condition on that.'
+        : ''),
     '',
     `Input: ${input.trim() || '(none)'}`,
   ]

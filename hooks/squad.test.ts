@@ -269,7 +269,16 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   })
   on('agent.list', async () => ({ value: agents }) as never)
   on('classic.UserPromptSubmit', async () => ({}))
-  on('tool.call', async () => ({ result: 'ok' }))
+  const stopped: string[] = []
+  on('tool.call', async (_$, e) => {
+    if (e.tool === 'TaskStop') {
+      const id = (e as unknown as { task_id: string }).task_id
+      stopped.push(id)
+      const a = agents.find(x => x.id === id)
+      if (a) a.status = 'killed'
+    }
+    return { result: 'ok' }
+  })
   on('turn.complete', async () => ({ text: '' }))
   on('turn.step', async function* (_$, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE } as never
@@ -312,6 +321,9 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   await $.agent.spawn({ prompt: 'Look.', description: 'look around', parentAgentId: 's2' } as never)
   await $.tool.call({ tool: 'Bash', command: 'make', agentId: 's2' } as never)
   expect(await text(/Bash/)).toBeDefined()
+  // A running step's card has its [X]; the leading leader's, its [Recall].
+  expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeDefined()
+  expect(await squad.find({ key: 'mission-1-lead-recall' })).toBeDefined()
   // Its model requests count up its tokens, and the mission's.
   const step = async (index: number) => {
     const stream = $.turn.step({ turnId: 't1', index, agentId: 's2', model: 'claude-haiku-5-5' } as never)
@@ -344,6 +356,19 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(' leading')).toBeUndefined()
   expect(await text('  Build OK; the check never ran.')).toBeDefined()
   expect((await squad.findAll({ type: 'Text', text: ' not run' })).length).toBe(2)
+  expect(await squad.find({ key: 'mission-1-lead-recall' })).toBeUndefined()
+  expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeUndefined()
+
+  // A second press; [Recall] calls the whole mission back, leader first.
+  const again = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await again.press({ key: 'combo-Run-Test' })
+  await again.unmount()
+  await $.agent.spawn({ prompt: 'Build.', description: '[Run-Test #2 1.1] build calc', parentAgentId: 's4' } as never)
+  await squad.press({ key: 'mission-2-lead-recall' })
+  expect(stopped).toEqual(['s4', 's5'])
+  expect(await text(' · 2 waves · 0/3 done · 1 stopped · 0s')).toBeDefined()
+  expect(await squad.find({ key: 'mission-2-lead-recall' })).toBeUndefined()
+  await squad.press({ key: 'mission-x-2' })
   // [x] takes one mission off; [Clear All] the rest.
   expect(await squad.find({ key: 'squad-clear' })).toBeDefined()
   expect(await squad.find({ key: 'mission-x-1' })).toBeDefined()

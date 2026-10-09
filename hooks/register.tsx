@@ -772,6 +772,48 @@ async function stopMinion($: EngineInterface, id: string) {
   await checkMinions($).catch(() => {})
 }
 
+// Dungeon's [X] on a step's card: that subagent is called back (TaskStop, as
+// Party's [x]); its leader hears it was stopped.
+async function recallRun($: EngineInterface, id: string) {
+  await stopMinion($, id)
+  await checkSquad($).catch(() => {})
+}
+
+// Dungeon's [Recall] on a leader's card: the whole mission is called back, its
+// leader first (so it sends out no more), then all it sent out that runs.
+async function recallMission($: EngineInterface, missionId: number) {
+  const mission = (await read($, squadAtom)).find(m => m.id === missionId)
+  if (!mission) return
+  const mine = new Set(runsOf([mission]).map(r => r.id))
+  const agents = await $.agent.list().catch(() => [])
+  // What it sent out that Dungeon has not seen yet, at any depth.
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const a of agents) if (a.parentId !== undefined && mine.has(a.parentId) && !mine.has(a.id)) (mine.add(a.id), (grew = true))
+  }
+  const live = (id: string) => {
+    const status = agents.find(a => a.id === id)?.status
+    return status === undefined ? runsOf([mission]).some(r => r.id === id && r.status === 'running') : !statusOfAgent(status)
+  }
+  const order = [...(mission.leader ? [mission.leader.id] : []), ...[...mine].filter(id => id !== mission.leader?.id)]
+  for (const id of order) if (live(id)) await stopMinion($, id)
+  const at = await $.clock.now()
+  await setSquad($, missions =>
+    missions.map(m => {
+      if (m.id !== missionId) return m
+      const stop = (r: SquadRun): SquadRun => (r.status === 'running' ? { ...r, status: 'stopped', endedAt: at } : r)
+      return {
+        ...m,
+        waves: m.waves.map(w => ({ ...w, steps: w.steps.map(st => (st.run ? { ...st, run: stop(st.run) } : st)) })),
+        others: m.others.map(stop),
+        ...(m.leader ? { leader: stop(m.leader) } : {}),
+        endedAt: m.endedAt ?? at,
+        outcome: 'stopped',
+      }
+    }),
+  )
+}
+
 // The chest is behind them and the little one has merged: it is gone.
 async function endParty($: EngineInterface) {
   partyAt = undefined
@@ -2544,7 +2586,7 @@ export const register: Register = on => {
     // A step's card: its mark and skill, and how it stands; opened (▸ / ▾),
     // its model and type, what it is doing, and its answer. A leader's card is
     // always open, and leading while its mission goes on.
-    const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number, leads = false) => {
+    const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number, leads = false, missionId?: number) => {
       const leading = leads && !ended && run !== undefined
       const look = leading ? LEADING_LOOK : run ? RUN_LOOK[run.status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
       // A leader's tokens are its mission's coin's, not its card's.
@@ -2570,7 +2612,25 @@ export const register: Register = on => {
               <Text color={look.color} dimColor={look.color === undefined}>{`${leads ? '' : ' '}${look.mark} `}</Text>
               <Text bold wrap="truncate-end">{title}</Text>
             </Box>
-            <Text color={look.color} dimColor={look.color === undefined}>{` ${look.word}`}</Text>
+            <Box flexDirection="row" flexShrink={0}>
+              <Text color={look.color} dimColor={look.color === undefined}>{` ${look.word}`}</Text>
+              {/* A running step's [X] calls its subagent back; a leading
+                  leader's [Recall], the whole mission. Red under the pointer. */}
+              {leading && missionId !== undefined && (
+                <Box flexDirection="row">
+                  <Text dimColor>{' ['}</Text>
+                  <Button key={`${key}-recall`} label="Recall" plain hover={{ scope: `${key}-recall`, color: hex(STOP_RED), bold: true }} onPress={() => recallMission($, missionId)} />
+                  <Text dimColor>]</Text>
+                </Box>
+              )}
+              {!leads && run?.status === 'running' && (
+                <Box flexDirection="row">
+                  <Text dimColor>{' ['}</Text>
+                  <Button key={`${key}-stop`} label="X" plain hover={{ scope: `${key}-stop`, color: hex(STOP_RED), bold: true }} onPress={() => recallRun($, run.id)} />
+                  <Text dimColor>]</Text>
+                </Box>
+              )}
+            </Box>
           </Box>
           {isOpen && (
             <Box flexDirection="row" justifyContent="space-between">
@@ -2602,7 +2662,7 @@ export const register: Register = on => {
         count('failed') ? `${count('failed')} failed` : '',
         count('stopped') ? `${count('stopped')} stopped` : '',
         m.begunAt === undefined ? 'queued' : '',
-        ended && m.outcome !== 'done' ? (m.outcome ?? '') : '',
+        ended && m.outcome !== 'done' && !(m.outcome === 'stopped' && count('stopped')) ? (m.outcome ?? '') : '',
         took,
       ]
         .filter(Boolean)
@@ -2632,7 +2692,7 @@ export const register: Register = on => {
             </Text>
           </Box>
           {/* The subagent leading it, and in the end its report. */}
-          {m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true)}
+          {m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true, m.id)}
           {/* Waves, closed to one line (how far its steps have got) until
               pressed open: each wave, its step cards and its condition, and
               the subagents no step names. */}
