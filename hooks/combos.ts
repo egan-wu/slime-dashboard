@@ -117,28 +117,43 @@ export function comboSummary(c: Combo): string {
   return `${layers} wave${layers === 1 ? '' : 's'} · ${steps} skill${steps === 1 ? '' : 's'}`
 }
 
-// The tag each Agent call's description starts with, so a step can be told apart.
-export const stepTag = (combo: string, layer: number, step: number) => `[${combo} ${layer + 1}.${step + 1}]`
+// The tag each Agent call's description starts with, so a step can be told
+// apart: `[Run-Test #3 2.1]`, `#3` the press (Dungeon's mission) it is of,
+// when the press has one.
+export const stepTag = (combo: string, layer: number, step: number, mission?: number) =>
+  `[${combo}${mission === undefined ? '' : ` #${mission}`} ${layer + 1}.${step + 1}]`
 
-// The prompt the main model gets to lead the combo: every layer in order, its
+// The model a combo's leader runs on: a subagent of its own, so the person's
+// conversation is never the one that leads it.
+export const LEADER_MODEL: ComboModel = 'sonnet'
+
+// The description a leader's Agent call starts with: `[Run-Test #3] lead`.
+export const leaderTag = (combo: string, mission: number) => `[${combo} #${mission}] lead`
+
+// The prompt the leader gets to lead the combo: every layer in order, its
 // steps fanned out at once with the model and subagent type each names, and
 // the conditions to judge after a layer. Empty layers are skipped; a combo
-// with no step at all has nothing to run.
-export function comboPrompt(combo: Combo, input: string): string | undefined {
+// with no step at all has nothing to run. `mission` numbers this press;
+// `subagent` says the leader is one, which waits on each step in the
+// foreground and answers with the report.
+export function comboPrompt(combo: Combo, input: string, mission?: number, subagent = false): string | undefined {
   const layers = combo.layers.filter(l => l.steps.length > 0)
   if (layers.length === 0) return undefined
   const lines = [
-    `Run the Party Combo "${combo.name}". You lead it: hand each step below to a subagent with the Agent tool, with exactly the model and subagent_type it names, and do not do a step's work yourself.`,
-    'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and whatever earlier steps found that it needs.',
+    `Run the Party Combo "${combo.name}"${mission === undefined ? '' : ` (mission #${mission})`}. You lead it: hand each step below to a subagent with the Agent tool, with exactly the model and subagent_type it names, and do not do a step's work yourself.`,
+    'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and whatever earlier steps found that it needs.' +
+      (subagent
+        ? ' However the Agent tool runs them, wait for every report of a wave before you go on. A step the person stopped is not run again: take it as failed, and judge the condition on that.'
+        : ''),
     '',
     `Input: ${input.trim() || '(none)'}`,
   ]
   combo.layers.forEach((layer, i) => {
     if (layer.steps.length === 0) return
     lines.push('', `Wave ${i + 1}${layer.steps.length > 1 ? ' (all at once)' : ''}:`)
-    layer.steps.forEach((s, j) => lines.push(`- ${stepTag(combo.name, i, j)} skill /${s.skill}, model ${s.model}, subagent_type ${s.agent}`))
+    layer.steps.forEach((s, j) => lines.push(`- ${stepTag(combo.name, i, j, mission)} skill /${s.skill}, model ${s.model}, subagent_type ${s.agent}`))
     if (layer.condition?.trim()) lines.push(`Then, before anything else, judge what came back: ${layer.condition.trim()}`)
   })
-  lines.push('', 'When the combo ends, report each step\'s result in a line or two.')
+  lines.push('', subagent ? 'When the combo ends, answer with each step\'s result in a line or two, and which waves did not run and why.' : 'When the combo ends, report each step\'s result in a line or two.')
   return lines.join('\n')
 }
