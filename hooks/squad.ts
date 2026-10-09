@@ -218,6 +218,17 @@ export function endLed(missions: readonly Mission[], id: string, outcome: Missio
   return missions.map(x => (x === m ? { ...x, endedAt: at, outcome } : x))
 }
 
+// Missions whose leader has ended its turn and that nothing else of runs any
+// more end now, as their leader did: what kept one going (a step, a step's
+// own helper) ended after the leader's last turn.
+export function settleLed(missions: readonly Mission[], at: number): Mission[] | undefined {
+  const due = (m: Mission) =>
+    m.leader !== undefined && m.endedAt === undefined && m.leader.status !== 'running' && !runsOf([m]).some(r => r.status === 'running')
+  if (!missions.some(due)) return undefined
+  const outcome = (r: SquadRun): Mission['outcome'] => (r.status === 'completed' ? 'done' : r.status === 'stopped' ? 'stopped' : 'error')
+  return missions.map(m => (due(m) ? { ...m, endedAt: at, outcome: outcome(m.leader!) } : m))
+}
+
 // The subagent under `id` is at work again (a leader woken by its steps'
 // reports): running once more, and its mission with it.
 export function reviveRun(missions: readonly Mission[], id: string): Mission[] | undefined {
@@ -284,6 +295,14 @@ export function tokensText(n: number): string {
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k tok`
   if (n < 1_000_000) return `${Math.round(n / 1000)}k tok`
   return `${(n / 1_000_000).toFixed(1)}M tok`
+}
+
+// A mission's tokens beside its coin: `812`, `9.4K`, `124K`, `1.2M`.
+export function coinText(n: number): string {
+  if (n < 1000) return `${n}`
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}K`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}K`
+  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 // A run's answer in a few lines: blank lines and markdown marks gone.

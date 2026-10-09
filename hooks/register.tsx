@@ -12,7 +12,7 @@ import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skills
 import type { Skill } from './skills'
 import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, attachRun, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, attachRun, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
 import type { Mission, RunStatus, SquadRun } from './squad'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
@@ -97,6 +97,9 @@ const RUN_LOOK: Record<RunStatus | 'waiting' | 'skipped', { mark: string; word: 
   stopped: { mark: '■', word: 'stopped', color: '#ff8c42' },
   skipped: { mark: '–', word: 'not run' },
 }
+// The coin before a mission's tokens: gold, turning while the mission runs.
+const COIN = { color: '#ffd23f', frames: ['●', '◐', '○', '◑'], ms: 250 }
+
 // A leader, while its mission goes on (between its turns as well).
 const LEADING_LOOK = { mark: '◆', word: 'leading', color: '#c77dff' }
 // A step's model as Dungeon names it: `sonnet` to `Sonnet`.
@@ -310,7 +313,16 @@ async function checkSquad($: EngineInterface) {
     const busy = agents.some(a => a.parentId === r.id && !statusOfAgent(a.status))
     await setSquad($, missions => endLed(missions, r.id, status === 'completed' ? 'done' : status === 'stopped' ? 'stopped' : 'error', at, busy))
   }
+  // A run the engine no longer lists has long ended, its end unseen.
+  for (const r of running) {
+    if (!agents.some(a => a.id === r.id) && at - r.startedAt > GONE_MS) await editRun($, r.id, x => (x.status === 'running' ? { ...x, status: 'completed', endedAt: x.endedAt ?? at } : x))
+  }
+  // A mission whose leader ended before what it waited on did ends now.
+  await setSquad($, missions => settleLed(missions, at))
 }
+
+// How long a run may go unlisted by the engine before Dungeon takes it as ended.
+const GONE_MS = 10_000
 
 // How long after its mission ended a leader may still be woken by a report.
 const LEADER_WAKE_MS = 120_000
@@ -1334,7 +1346,8 @@ export const register: Register = on => {
       }
       if (tick % 10 === 5) await checkMinions($)
       if (tick % 10 === 5) await checkSquad($).catch(() => {})
-      if (tick % 10 === 0 && anyLive(await read($, squadAtom))) await update($, squadNowAtom, () => tick).catch(() => {})
+      // Dungeon redraws while a mission runs: its coin turns, its clocks tick.
+      if (tick % 2 === 0 && anyLive(await read($, squadAtom))) await update($, squadNowAtom, () => tick).catch(() => {})
       if (columns > 0) {
         const walking = moving(busy, minions)
         if ((respawnTick() ?? 0) >= respawnLength(columns)) respawnAt = undefined
@@ -2534,7 +2547,8 @@ export const register: Register = on => {
     const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number, leads = false) => {
       const leading = leads && !ended && run !== undefined
       const look = leading ? LEADING_LOOK : run ? RUN_LOOK[run.status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
-      const tokens = run && runTokens(run) ? tokensText(runTokens(run)) : ''
+      // A leader's tokens are its mission's coin's, not its card's.
+      const tokens = run && !leads && runTokens(run) ? tokensText(runTokens(run)) : ''
       const doing = !run
         ? ''
         : run.status === 'running'
@@ -2575,8 +2589,7 @@ export const register: Register = on => {
 
     const blocks = [...missions].reverse().map(m => {
       const ended = m.endedAt !== undefined
-      const state = m.begunAt === undefined ? 'queued' : !ended ? 'running' : m.outcome === 'done' ? 'done' : m.outcome === 'stopped' ? 'stopped' : 'error'
-      const took = m.begunAt !== undefined ? ` ${elapsed((m.endedAt ?? now) - m.begunAt)}` : ''
+      const took = m.begunAt !== undefined && ended ? elapsed(m.endedAt! - m.begunAt) : ''
       const spent = tokensOf([m])
       const wavesKey = `mission-${m.id}-waves`
       const wavesOpen = open.includes(wavesKey)
@@ -2588,6 +2601,9 @@ export const register: Register = on => {
         count('running') ? `${count('running')} running` : '',
         count('failed') ? `${count('failed')} failed` : '',
         count('stopped') ? `${count('stopped')} stopped` : '',
+        m.begunAt === undefined ? 'queued' : '',
+        ended && m.outcome !== 'done' ? (m.outcome ?? '') : '',
+        took,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -2607,7 +2623,14 @@ export const register: Register = on => {
               <Text color={hex(STOP_RED)}>]</Text>
             </Box>
           </Box>
-          <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)} · ${state}${took}${spent ? ` · ${tokensText(spent)}` : ''}`}</Text>
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)}`}</Text>
+            {/* What the whole combo has spent: a gold coin, spinning while it runs. */}
+            <Text>
+              <Text color={COIN.color} bold>{`${!ended && m.begunAt !== undefined ? COIN.frames[Math.floor(now / COIN.ms) % COIN.frames.length] : COIN.frames[0]} `}</Text>
+              <Text color={COIN.color}>{coinText(spent)}</Text>
+            </Text>
+          </Box>
           {/* The subagent leading it, and in the end its report. */}
           {m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true)}
           {/* Waves, closed to one line (how far its steps have got) until

@@ -115,9 +115,9 @@ A tab of its own that opens when a Party Combo is pressed, and follows each pres
 | What | Shows |
 | --- | --- |
 | The purple banner | The combo's name; the red `[x]` at its right takes the mission off the tab. |
-| `#3 · 2026-10-09 15:21 · running 42s · 124k tok` | The mission's number, when it was sent, how it stands (`queued` until its leader starts, then `running`, `done`, `stopped` or `error`), how long it has taken, and the tokens its subagents' model requests have used (taken in, cache reads included, and given out). |
+| `#3 · 2026-10-09 15:21`  `● 124K` | The mission's number and when it was sent; at the right, after a gold coin that turns while the mission runs, the tokens the whole combo has used (its leader's and every subagent's requests: taken in, cache reads included, and given out). |
 | `◆ Leader  leading` | The subagent leading the mission, `leading` until the mission ends (between its turns as well), then its report of each step. The mission ends with it. |
-| `▸ Waves · 2 waves · 1/3 done · 1 running` | The waves, closed to how far their steps have got until pressed open (`▾`). |
+| `▸ Waves · 2 waves · 2/3 done · 1m 05s` | The waves, closed to how far their steps have got until pressed open (`▾`): how many are done, running, failed or stopped, `queued` before its leader starts, and once the mission ends how long it took (and `stopped` or `error` if so). |
 | `Wave 1` … | The waves as they stood when pressed, with their conditions. Each step is a rounded card, closed to one line (its skill and how it stands) until `▸` opens it: then its model and subagent type, and how it stands (waiting, running with its model requests, last tool and time, done, failed, stopped, or not run when the combo ended before it) and its tokens, then the first lines of its answer. |
 | `Other subagents` | Subagents whose tag names no step: one a step's skill sent out itself, or one the leader added. |
 | `[Clear All]` | Takes every mission off the tab. |

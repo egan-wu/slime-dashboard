@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { comboPrompt } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, coinText, settleLed, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
 import type { SquadRun } from './squad'
 
 const PLUGIN = 'slime-dashboard'
@@ -155,6 +155,10 @@ test('a few words of a run: its status, time and answer', () => {
   expect(runTokens({ ...run('a', 'x'), tokens: 900, turnTokens: 500 })).toBe(900)
   expect(runTokens({ ...run('a', 'x'), turnTokens: 500 })).toBe(500)
   expect(runTokens(run('a', 'x'))).toBe(0)
+  expect(coinText(812)).toBe('812')
+  expect(coinText(9_420)).toBe('9.4K')
+  expect(coinText(124_400)).toBe('124K')
+  expect(coinText(1_234_567)).toBe('1.2M')
   expect(tokensText(812)).toBe('812 tok')
   expect(tokensText(9_420)).toBe('9.4k tok')
   expect(tokensText(30_776)).toBe('31k tok')
@@ -211,6 +215,18 @@ test('a leader that sends its steps to the background ends its turn, is woken by
   // A step found after its end takes the mission up again.
   ms = attachRun(ms, run('c', 'late'), 'L')!
   expect(ms[0]!.endedAt).toBeUndefined()
+})
+
+test('a leader that answered while a helper still ran: its mission ends once the helper does', () => {
+  let ms = attachRun([newMission(1, RUN_TEST, 0)], run('L', '[Run-Test #1] lead the Party Combo'))!
+  ms = attachRun(ms, run('h', 'look around'), 'L')!
+  ms = updateRun(ms, 'L', r => ({ ...r, status: 'completed', endedAt: 5 }))!
+  expect(endLed(ms, 'L', 'done', 5)).toBeUndefined()
+  expect(settleLed(ms, 6)).toBeUndefined()
+  ms = updateRun(ms, 'h', r => ({ ...r, status: 'completed', endedAt: 7 }))!
+  ms = settleLed(ms, 8)!
+  expect(ms[0]).toMatchObject({ endedAt: 8, outcome: 'done' })
+  expect(settleLed(ms, 9)).toBeUndefined()
 })
 
 test('the agents a leader spawned, unseen by agent.spawn, are found in the agent list', () => {
@@ -270,7 +286,8 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   const squad = await $.ui.mount({ ...SQUAD, surface: 'terminal' })
   const text = async (t: string | RegExp) => squad.find({ type: 'Text', text: t })
   expect(await text('Run-Test')).toBeDefined()
-  expect(await text('#1 · 1970-01-01 00:00 · running 0s')).toBeDefined()
+  expect(await text('#1 · 1970-01-01 00:00')).toBeDefined()
+  expect(await text('0')).toBeDefined()
   expect(await text('Leader')).toBeDefined()
   expect(await text('  Sonnet')).toBeDefined()
   // The waves are closed to how far their steps have got, until pressed open.
@@ -304,7 +321,8 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   await step(0)
   await step(1)
   expect(await text(/· 59k tok/)).toBeDefined()
-  expect(await text(/#1 · .* · running .* · 59k tok/)).toBeDefined()
+  // The mission's coin counts them up: K and M.
+  expect(await text('59K')).toBeDefined()
   expect(await text('Other subagents')).toBeDefined()
   expect(await text('look around')).toBeDefined()
   await squad.press({ key: 'mission-1-o0-fold' })
@@ -315,13 +333,14 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
   // The person's own turn ends: the mission is the leader's, and goes on.
   await $.turn.complete({ reason: 'answer', answer: 'Hello.', durationMs: 1, turnId: 't0', isAborted: false } as never)
-  expect(await text(/· running/)).toBeDefined()
+  expect(await text(' leading')).toBeDefined()
   // The helper answers, then the leader: the mission ends with it, the later steps never reached.
   await $.turn.complete({ reason: 'answer', answer: 'Looked.', durationMs: 1, turnId: 't2', isAborted: false, agentId: 's3' } as never)
-  expect(await text(/· running/)).toBeDefined()
+  expect(await text(' leading')).toBeDefined()
   expect(await text(' leading')).toBeDefined()
   await $.turn.complete({ reason: 'answer', answer: 'Build OK; the check never ran.', durationMs: 1, turnId: 't3', isAborted: false, agentId: 's1' } as never)
-  expect(await text(/· done/)).toBeDefined()
+  // Done: how long it took follows its waves' count.
+  expect(await text(' · 2 waves · 1/3 done · 0s')).toBeDefined()
   expect(await text(' leading')).toBeUndefined()
   expect(await text('  Build OK; the check never ran.')).toBeDefined()
   expect((await squad.findAll({ type: 'Text', text: ' not run' })).length).toBe(2)
