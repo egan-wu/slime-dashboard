@@ -103,7 +103,7 @@ const SLIME = {
   // Unloading, it opens a round mouth to spit each spray out of it.
   spit: ['.BHMB.', 'DEMMED', 'DBKKBD', 'DKKKKD', 'DBKKBD', 'DBBBBD'],
 }
-const MOUTH = { K: 0xffffff, R: 0xff7a9c }
+export const MOUTH = { K: 0xffffff, R: 0xff7a9c }
 // A subagent's little slime, trailing the main one: a 2x2 ball in the air
 // that flattens on landing and springs back.
 const MINI = { ball: ['BB', 'BB'], flat: ['BBBB'] }
@@ -569,7 +569,7 @@ export function frame(
   // passes until a limit resets or they answer. The little slimes keep hopping.
   const halted = face.down === true || face.ask === true
   // Unloading wakes it too, though it only travels if the session is busy.
-  const awake = busy || fete !== undefined || halted || face.unloading === true
+  const awake = busy || fete !== undefined || halted || face.unloading === true || face.warming === true
   const travelling = fete ? fete.scrolling : busy && !halted
   const px = new Uint32Array(w * PX_H).fill(SKY)
   const put = (x: number, y: number, color: number) => {
@@ -683,6 +683,7 @@ export function frame(
       draw({ rows: GOO, colors: { G: gooColor(worldX) } }, x, GROUND_Y - 1)
     }
   }
+  if (face.camp !== undefined && !fete) campfire(draw, put, face.camp, tick, face.campAge ?? LIGHT.grown, mainLeft + (SLIME.awake[0]!.length >> 1), face.embers === true)
   let line = 0
   minions.forEach(f => {
     const m = typeof f === 'string' ? f : f.model
@@ -829,7 +830,9 @@ export function frame(
     let rows = gaping
       ? SLIME.gape
       : !travelling
-      ? SLIME.awake
+      ? face.camp !== undefined && lightingGape(face.campAge ?? LIGHT.grown)
+        ? SLIME.gape
+        : SLIME.awake
       : lift > 0
         ? SLIME.air
         : Math.floor(tick / 2) % 2 === 0
@@ -926,6 +929,96 @@ export function frame(
   }
 
   return pack(px, w, overlays)
+}
+
+// Cache Warming's campfire: a row of logs on the ground and a fire on them
+// that flickers through three frames, a spark rising from it now and then.
+// About twenty-five pixels. It stands in the world, so it stays put while the
+// troop rests and slides away with the ground once it travels on.
+export const WARM_COLORS = [0xff4d00, 0xff8a1c, 0xffb627, 0xffe28a] as const
+export const CAMPFIRE_W = 5
+// A single row of logs, as wide as the fire on it.
+const LOGS = { rows: ['LDLDL'], colors: { L: 0x8b5a2b, D: 0x5c3a1e } }
+const FLAMES = [
+  ['..W..', '.WYY.', '.YOY.', 'RORRO'],
+  ['...W.', '..YW.', '.YOYY', 'ORROR'],
+  ['.W...', '.WY..', 'YOOY.', 'RORRO'],
+]
+const FLAME_COLORS = { R: WARM_COLORS[0], O: WARM_COLORS[1], Y: WARM_COLORS[2], W: WARM_COLORS[3] }
+// Lighting it, in ticks from when the troop came to rest: the slime gapes and
+// spits a log, which arcs onto the spot; a pause; it gapes again and spits a
+// flame onto the log, which catches and grows into the fire.
+export const LIGHT = { logFly: 2, logLand: 8, flameOpen: 12, flameFly: 14, flameLand: 19, grown: 23 } as const
+// Whether the slime's mouth is open at this point of the lighting.
+export const lightingGape = (age: number) => (age >= 0 && age < 4) || (age >= LIGHT.flameOpen && age < LIGHT.flameFly + 2)
+const SPAT_FLAME = ['OY', 'RO']
+// Burnt down to embers: the logs glow here and there, slowly, dark red to
+// orange, smoke rising from them in puffs; no flame and no spark.
+export const EMBER_COLORS = [0x6e1400, 0xa82a00, 0xe0520f] as const
+const EMBERS = [
+  [[1, 0], [3, 2]],
+  [[1, 1], [2, 0], [3, 1]],
+  [[1, 2], [3, 0]],
+  [[2, 1], [3, 1], [1, 0]],
+] as const
+const SMOKE_COLORS = [0x9a948e, 0x7d7873, 0x605c58] as const
+const SMOKE_EVERY = 8
+const SMOKE_LIFE = 12
+function campfire(
+  draw: (sprite: Sprite, x: number, bottom: number) => void,
+  put: (x: number, y: number, c: number) => void,
+  x: number,
+  tick: number,
+  age: number,
+  mouthX: number,
+  embers = false,
+) {
+  if (embers) {
+    draw(LOGS, x, GROUND_Y - 1)
+    for (const [dx, glow] of EMBERS[Math.floor(tick / 6) % EMBERS.length]!) put(x + dx, GROUND_Y - 1, EMBER_COLORS[glow])
+    // Smoke: two-pixel puffs, one rising as the last thins, each drifting
+    // a step aside as it climbs and fading from grey into the air.
+    for (const k of [0, 1]) {
+      const at = tick + k * SMOKE_EVERY
+      const age = at % (2 * SMOKE_EVERY)
+      if (age >= SMOKE_LIFE) continue
+      const sway = (Math.floor(at / (2 * SMOKE_EVERY)) + (age >> 2)) % 2
+      const shade = SMOKE_COLORS[Math.min(SMOKE_COLORS.length - 1, age >> 2)]!
+      const y = GROUND_Y - 2 - (age >> 1)
+      put(x + 1 + sway, y, shade)
+      put(x + 2 + sway, y, shade)
+    }
+    return
+  }
+  const mouthY = GROUND_Y - 3
+  const arc = (from: number, to: number, k: number, high: number) => ({
+    x: Math.round(from + (to - from) * k),
+    y: Math.round(mouthY + (GROUND_Y - 1 - mouthY) * k - Math.sin(k * Math.PI) * high),
+  })
+  if (age < LIGHT.logLand) {
+    if (age >= LIGHT.logFly) {
+      const p = arc(mouthX - 2, x, (age - LIGHT.logFly) / (LIGHT.logLand - LIGHT.logFly), 3)
+      draw(LOGS, p.x, p.y)
+    }
+    return
+  }
+  draw(LOGS, x, GROUND_Y - 1)
+  if (age < LIGHT.flameLand) {
+    if (age >= LIGHT.flameFly) {
+      const p = arc(mouthX - 1, x + 2, (age - LIGHT.flameFly) / (LIGHT.flameLand - LIGHT.flameFly), 3)
+      draw({ rows: SPAT_FLAME, colors: FLAME_COLORS }, p.x, p.y)
+    }
+    return
+  }
+  // Caught: the fire's lower rows first, then all of it.
+  const flame = FLAMES[Math.floor(tick / 2) % FLAMES.length]!
+  draw({ rows: age < LIGHT.grown ? flame.slice(2) : flame, colors: FLAME_COLORS }, x, GROUND_Y - 2)
+  // A spark climbs from the flames' tip and goes out, one every so often.
+  const sparkAge = tick % 12
+  if (age >= LIGHT.grown && sparkAge < 6 && kept(Math.floor(tick / 12), PERF[perf].fx)) {
+    const drift = unit(Math.floor(tick / 12), 0x5a4c) < 0.5 ? 0 : 1
+    put(x + 2 + (sparkAge > 2 ? drift : 0), GROUND_Y - 6 - sparkAge, sparkAge < 3 ? WARM_COLORS[3] : WARM_COLORS[2])
+  }
 }
 
 function pack(px: Uint32Array, w: number, overlays: Overlay[]): string {

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { colorsFrom, DEFAULT_COLORS, frame, modelInfo, PALETTES, POTION_COLORS, ROWS, setColors, UNLOAD_COLORS } from './scene'
+import { colorsFrom, DEFAULT_COLORS, frame, modelInfo, PALETTES, POTION_COLORS, ROWS, setColors, UNLOAD_COLORS, WARM_COLORS, CAMPFIRE_W, EMBER_COLORS, LIGHT, MOUTH } from './scene'
 import { faceOf, filledOf, isDown, vitalsOf } from './vitals'
 
 test('a subscription: HP is the seven-day limit left, MP the five-hour one', async () => {
@@ -78,6 +78,74 @@ test('a thought bubble with the potion rises at the main slime\'s upper left', a
   expect(pixels(8, ['mp']).has(POTION_COLORS.hp.p)).toBe(false)
   expect(pixels(8, ['mp', 'hp']).has(POTION_COLORS.hp.p)).toBe(true)
   expect(pixels(16, ['mp']).has(POTION_COLORS.mp.p)).toBe(false)
+})
+
+test('Cache Warming: the idle slime stays awake by a campfire that burns where it is set', async () => {
+  const look = (tick: number, face: { warming?: boolean; camp?: number }) => {
+    const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, face)
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    const chars = new Set<number>()
+    // The columns any flame color shows in.
+    const fire = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) {
+      chars.add(words[i]!)
+      if (WARM_COLORS.some(c => c === words[i + 1] || c === words[i + 2])) fire.add((i / 3) % 30)
+    }
+    return { fire: [...fire].sort((a, b) => a - b), asleep: chars.has('z'.codePointAt(0)!), cells }
+  }
+  // Warming keeps it awake; the slime itself carries no flame.
+  expect(look(0, {}).asleep).toBe(true)
+  expect(look(0, { warming: true }).asleep).toBe(false)
+  expect(look(0, { warming: true }).fire).toEqual([])
+  // The fire burns at its column, flickering from beat to beat.
+  const lit = look(0, { warming: true, camp: 10 })
+  expect(lit.fire.length).toBeGreaterThan(0)
+  expect(Math.min(...lit.fire)).toBeGreaterThanOrEqual(10)
+  expect(Math.max(...lit.fire)).toBeLessThan(10 + CAMPFIRE_W)
+  expect(look(2, { warming: true, camp: 10 }).cells).not.toBe(lit.cells)
+  // Set further left, it is drawn further left, and off the edge, not at all.
+  expect(Math.min(...look(0, { warming: true, camp: 4 }).fire)).toBeLessThan(10)
+  expect(look(0, { warming: true, camp: -CAMPFIRE_W }).fire).toEqual([])
+})
+
+test('Cache Warming resting: the fire burns down to embers and the slime sleeps beside them', async () => {
+  const look = (tick: number) => {
+    const cells = frame(30, off(), tick, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, { embers: true, camp: 10 })
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    const chars = new Set<number>()
+    const colors = new Set<number>()
+    const glow = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) {
+      chars.add(words[i]!)
+      colors.add(words[i + 1]!).add(words[i + 2]!)
+      if (EMBER_COLORS.some(c => c === words[i + 1] || c === words[i + 2])) glow.add((i / 3) % 30)
+    }
+    return { asleep: chars.has('z'.codePointAt(0)!), flame: WARM_COLORS.some(c => colors.has(c)), log: colors.has(0x8b5a2b), glow: [...glow], cells }
+  }
+  const now = look(0)
+  expect(now.asleep).toBe(true)
+  expect(now.flame).toBe(false)
+  expect(now.log).toBe(true)
+  expect(Math.min(...now.glow)).toBeGreaterThanOrEqual(10)
+  expect(Math.max(...now.glow)).toBeLessThan(10 + CAMPFIRE_W)
+  // They glow on slowly, changing every few beats.
+  expect(look(6).cells).not.toBe(now.cells)
+})
+
+test('lighting the fire: the slime gapes and spits a log, then a flame, and the fire catches', async () => {
+  const at = (campAge: number) => {
+    const cells = frame(30, off(), 100 + campAge, false, 'claude-haiku-4-5', [], { day: true, sky: 'cloudy' }, undefined, { warming: true, camp: 10, campAge })
+    const words = new Uint32Array(Uint8Array.from(atob(cells), c => c.charCodeAt(0)).buffer)
+    const colors = new Set<number>()
+    for (let i = 0; i < words.length; i += 3) colors.add(words[i + 1]!).add(words[i + 2]!)
+    return { gape: colors.has(MOUTH.K), log: colors.has(0x8b5a2b), flame: WARM_COLORS.some(c => colors.has(c)) }
+  }
+  expect(at(1)).toEqual({ gape: true, log: false, flame: false })
+  expect(at(LIGHT.logFly + 2).log).toBe(true)
+  expect(at(LIGHT.logLand + 1)).toEqual({ gape: false, log: true, flame: false })
+  expect(at(LIGHT.flameOpen).gape).toBe(true)
+  expect(at(LIGHT.flameFly + 3).flame).toBe(true)
+  expect(at(LIGHT.grown + 5)).toEqual({ gape: false, log: true, flame: true })
 })
 
 test('unloading wakes a sleeping slime, which flashes, opens its mouth and spits colored pixels under falling arrows', async () => {

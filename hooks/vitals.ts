@@ -45,7 +45,11 @@ export type Potion = 'hp' | 'mp'
 // `unloading`: the context is compacting; the slime wakes and a flashing
 // ring with a sack and a green down arrow stands where the potions do.
 // `respawn`: ticks since the Skill Box's Respawn cleared the session.
-export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[]; unloading?: boolean; respawn?: number }
+// `warming`: Cache Warming is on, so the slime stays awake (standing still
+// while idle) instead of falling asleep; `camp`: where its campfire burns
+// (the screen column of its left edge), absent when there is none;
+// `campAge`: ticks since it was set, while the slime spits a log and a flame.
+export type Face = { eyes?: Eyes; vein?: boolean; down?: boolean; ask?: boolean; potions?: Potion[]; unloading?: boolean; respawn?: number; warming?: boolean; embers?: boolean; camp?: number; campAge?: number }
 
 // Down: it stops with crossed-out eyes. Walking with a full head: squinting
 // from 50%, a vein beside its head from 70%, in tears from 90%.

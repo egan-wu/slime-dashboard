@@ -16,6 +16,11 @@ export type SlimeVitals = { plan: 'subscription' | 'api'; hp: number; mp: number
 export type SlimeMinion = { id: string; model: string; description?: string; done?: boolean }
 // A recent session the sign's [≡] lists (hooks/summary.ts): its id, name and last write.
 export type SlimeRecentSession = { id: string; title: string; at: number }
+// One day of the Journal (hooks/journal.ts).
+export type SlimeDay = {
+  day: string; turns: number; input: number; cacheWrite: number; cacheRead: number; output: number
+  cold: number; coldTokens: number; pings: number; pingRead: number; rescues: number; rescued: number; saved: number
+}
 export type SlimeWeather = {
   day: boolean
   sky: 'clear' | 'partly' | 'cloudy' | 'rain' | 'snow'
@@ -58,7 +63,15 @@ declare module 'claude-code' {
       comboDelete: boolean
       agents: string[]
       propsOpen: boolean
+      passiveOpen: boolean
       tally: SlimeTally
+      cacheTtl: { ttl: '5m' | '1h'; from: 'env' | 'setting' | 'auto' }
+      cacheAt: number
+      warmAuto: boolean
+      warmPrefix: number
+      journal: SlimeDay[]
+      journalOpen: boolean
+      journalWarmOpen: boolean
       iteration: number
       lastTurnMs: number
       turnStartedAt: number
@@ -76,7 +89,7 @@ declare module 'claude-code' {
       unloading: boolean
       orderOpen: boolean
       width: number
-      order: Array<'session' | 'stats' | 'scene' | 'models' | 'property' | 'skills' | 'tree' | 'monitor' | 'events'>
+      order: Array<'session' | 'stats' | 'scene' | 'models' | 'passive' | 'property' | 'skills' | 'tree' | 'monitor' | 'events' | 'journal'>
       behind: boolean
     }
   }

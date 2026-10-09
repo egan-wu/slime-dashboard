@@ -7,11 +7,13 @@ export const SECTIONS = [
   { id: 'stats', label: 'HP / MP / CP' },
   { id: 'scene', label: 'Slime' },
   { id: 'models', label: 'Model buttons' },
+  { id: 'passive', label: 'Passive' },
   { id: 'property', label: 'Property' },
   { id: 'skills', label: 'Skill Box' },
   { id: 'tree', label: 'Skill Tree' },
   { id: 'monitor', label: 'Party' },
   { id: 'events', label: 'Event Message' },
+  { id: 'journal', label: 'Journal' },
 ] as const
 
 export type SectionId = (typeof SECTIONS)[number]['id']
