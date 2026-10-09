@@ -769,6 +769,8 @@ async function refreshVitals($: EngineInterface) {
 // The bars' colors: HP a bright red, MP a bright blue; CP shades from a
 // lighter to a darker grey along its length.
 const BAR = { hp: '#ff5c5c', mp: '#4db8ff' }
+// The Skill Box prompt's title banner: the MP blue deepened, so white reads on it.
+const PROMPT_BANNER = '#1f6fb8'
 const CP_FROM = 0x9e9e9e
 const CP_TO = 0x4a4a4a
 function cpColor(i: number, cells: number) {
@@ -1913,20 +1915,27 @@ export const register: Register = on => {
         {skillsOpen && (
           <Box flexDirection="column">
             {Input && (
-              // The prompt field stands out: a bright frame with a bold title,
-              // a prompt mark before the field, and how to use it while empty.
-              <Box flexDirection="column" borderStyle="round" borderColor={BAR.mp} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
+              // The prompt: a bold title, the pieces kept so far each in a
+              // bright frame, and the field under them, unframed. The field
+              // wraps its text at the pane's whole width, whatever holds it, so
+              // it stands at that width: inside a frame, its second row spills
+              // past a box that does not grow for it.
+              <Box flexDirection="column">
                 {/* [Clear] at the title's right takes every piece out at once. */}
-                <Box flexDirection="row" justifyContent="space-between">
-                  <Text bold color={BAR.mp}>
-                    Prompt for skill
-                  </Text>
+                <Box flexDirection="row" justifyContent="space-between" alignItems="center" width={Math.max(8, (columns || OPEN.columns) - 1)}>
+                  <Box flexDirection="row" borderStyle="round" borderColor={BAR.mp}>
+                    <Box flexDirection="row" backgroundColor={PROMPT_BANNER} paddingX={1}>
+                      <Text bold color="#ffffff">
+                        Prompt for skill
+                      </Text>
+                    </Box>
+                  </Box>
                   {skillPieces.length > 0 && <Button key="skill-pieces-clear" label="[Clear]" plain onPress={() => update($, skillPiecesAtom, () => [])} />}
                 </Box>
                 {/* Each piece kept with Enter, whole and wrapped in a frame of
                     its own, ▲ ▼ at its top right moving it, x taking it out. */}
                 {skillPieces.map((piece, i) => (
-                  <Box key={`skill-piece-${i}`} flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="round" borderColor={BAR.mp} paddingX={1}>
+                  <Box key={`skill-piece-${i}`} flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="round" borderColor={BAR.mp} paddingX={1} width={Math.max(8, (columns || OPEN.columns) - 1)}>
                     <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text wrap="wrap">{piece}</Text>
                     </Box>
@@ -1937,10 +1946,11 @@ export const register: Register = on => {
                 ))}
                 <Input
                   key={skillPromptKey(skillPieces.length)}
-                  label="›"
+                  // A space before the mark, in the label: a margin would push
+                  // the field, as wide as the pane, past its edge.
+                  label=" ›"
                   placeholder="type, Enter; then press a skill"
-                  // What Enter does shows only while the field is empty: drawn
-                  // at its right, it would cover the end of what is typed.
+                  // What Enter does shows only while the field is empty.
                   submitLabel={skillPrompt === '' ? 'add' : ''}
                   value={skillPrompt}
                   onInput={(value: string) => update($, skillPromptAtom, () => value)}

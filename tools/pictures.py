@@ -192,10 +192,16 @@ def journal_rows():
     return section('Journal', block)
 
 
+PROMPT_BANNER = (31, 111, 184)
+
+
 def skills_rows():
     return section(
         'Skill Box',
-        ('frame', [('split', [run('Prompt for skill', MP, True)], [run('[Clear]')]), ('frame', [('split', [run('only slow tests')], [run('▲ ▼ x', DIM)])], MP), ('frame', [('split', [run('30')], [run('▲ ▼ x', DIM)])], MP), [run('› ')]], MP),
+        ('box', [run(' Prompt for skill ', (255, 255, 255), True, PROMPT_BANNER)], MP, [run('[Clear]')]),
+        ('frame', [('split', [run('only slow tests')], [run('▲ ▼ x', DIM)])], MP),
+        ('frame', [('split', [run('30')], [run('▲ ▼ x', DIM)])], MP),
+        [run(' ›: '), run('type, Enter; then press a skill', DIM)],
         ('frame', [('split', [run('▼ General')], MOVE),
                    [run('[▼]'), run('[Unload]'), run(': compact context window', DIM)],
                    [run('[▼]'), run('[Respawn]'), run(': create new session', DIM)],
@@ -286,6 +292,8 @@ def row_height(content):
     kind = content[0] if isinstance(content, tuple) else None
     if kind == 'frame':
         return sum(row_height(r) for r in content[1]) + 2
+    if kind == 'box':
+        return 3
     if kind == 'indent':
         return sum(row_height(r) for r in content[2])
     if kind == 'scene':
@@ -342,6 +350,17 @@ def draw_row(d, content, y, left, right, cells=None, ask=False):
         for r in inner:
             y = draw_row(d, r, y, left + 2, right - 2, cells, ask)
         return y + CH
+    if kind == 'box':
+        # ('box', runs, frame color, runs at the right): a frame just wide
+        # enough for its runs, the others level with them outside it.
+        width = sum(len(r[0]) for r in content[1])
+        x0, x1 = PAD + left * CW + CW // 2, PAD + (left + width + 2) * CW - CW // 2
+        d.rounded_rectangle([x0, y + CH // 2, x1, y + 2 * CH + CH // 2], radius=10, outline=content[2], width=2)
+        draw_runs(d, content[1], left + 1, y + CH, left + 1 + width)
+        right_runs = content[3] if len(content) > 3 else []
+        rw = sum(len(r[0]) for r in right_runs)
+        draw_runs(d, right_runs, right - rw, y + CH, right)
+        return y + 3 * CH
     if kind == 'indent':
         # ('indent', columns, rows, columns off the right too)
         inset = content[3] if len(content) > 3 else 0

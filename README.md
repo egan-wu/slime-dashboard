@@ -75,11 +75,11 @@ Below them: the cache hit rate, the cache's time to live (`1h` or `5m`: `(env)` 
 
 ## Skill Box
 
-<img src="docs/skills.png" width="340" alt="Skill Box open: Prompt for skill with [Clear] at its right and two framed pieces, only slow tests and 30, each with ▲ ▼ x, above an empty field; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
+<img src="docs/skills.png" width="340" alt="Skill Box open: Prompt for skill, white on blue in a small frame, [Clear] at its right; two framed pieces, only slow tests and 30, each with ▲ ▼ x, above the empty ›: field; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
 
 | Button | What it does |
 | --- | --- |
-| Prompt for skill | Type, then Enter: the text becomes a piece in a frame of its own above the field, `▲ ▼` at its right moving it up or down, `x` taking it out, and `[Clear]` at the title's right taking them all out. After Enter the field keeps the keys for the next piece. Type as many pieces as you like; the next skill you press is sent with them all, in order (and anything still in the field), and they clear. |
+| Prompt for skill | The field under the title, as wide as the pane so a long line wraps in full. Type, then Enter: the text becomes a piece in a frame of its own above the field, `▲ ▼` at its right moving it up or down, `x` taking it out, and `[Clear]` at the title's right taking them all out. After Enter the field keeps the keys for the next piece. Type as many pieces as you like; the next skill you press is sent with them all, in order (and anything still in the field), and they clear. |
 | `▼ General` / `▸ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | `[▼]` `[▲]` (right of a category) | Moves the category a place down or up, kept across sessions. |
 | `[▼]` (before a skill) | Trades places with the skill under it, kept across sessions. |
