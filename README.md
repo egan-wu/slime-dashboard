@@ -93,7 +93,7 @@ Skills are added with `/slime-dashboard add` (see [Usage](#usage)).
 
 <img src="docs/tree.png" width="340" alt="Party Combo open: tabs Run-Test and Nightly*, then Run-Test under a purple banner with [Rename]; three wave boxes, each with ▲ ▼ ✕ and its skills (a model swatch, the skill, its model and subagent type), a condition and an arrow between them, then + Wave and [Save] [Delete]">
 
-Party Combos: your Skill Box skills chained into waves, each skill run by a subagent with the model and subagent type you pick, and Claude leading the whole run. The waves run in order; the skills of one wave all start at once, and the next wave waits for them all. For example, build, then unit-test, then check the result on Sonnet while Haiku archives the logs, at the same time.
+Party Combos: your Skill Box skills chained into waves, each skill run by a subagent with the model and subagent type you pick, and a leader subagent of its own (on Sonnet) leading the whole run in the background, so your conversation is never the one paying for it. The waves run in order; the skills of one wave all start at once, and the next wave waits for them all. For example, build, then unit-test, then check the result on Sonnet while Haiku archives the logs, at the same time.
 
 | Button | What it does |
 | --- | --- |
@@ -107,6 +107,22 @@ Party Combos: your Skill Box skills chained into waves, each skill run by a suba
 | `[Save]` / `[Delete]` | Edits stay a draft, so trying things never breaks a combo that works, until `[Save]` (green under the pointer) keeps them; empty waves are dropped then. `[Delete]` (red under the pointer) asks `[Delete [Y]/[N]]`. |
 
 A saved combo shows in the Skill Box under **Party Combo**. Explore and plan subagents only read, so a skill that writes files (a build, an archive) wants general.
+
+## Dungeon
+
+A tab of its own that opens when a Party Combo is pressed, and follows each press as a mission until its leader has led it to the end. Each press gets a number, `#1`, `#2`, …; its prompt and each step's tag carry it (`[Run-Test #3 2.1]`), so combos pressed close together, or one combo pressed twice, keep their subagents apart.
+
+| What | Shows |
+| --- | --- |
+| The purple banner | The combo's name; the red `[x]` at its right takes the mission off the tab. |
+| `#3 · 2026-10-09 15:21 · running 42s · 124k tok` | The mission's number, when it was sent, how it stands (`queued` until its leader starts, then `running`, `done`, `stopped` or `error`), how long it has taken, and the tokens its subagents' model requests have used (taken in, cache reads included, and given out). |
+| `◆ Leader  leading` | The subagent leading the mission, `leading` until the mission ends (between its turns as well), then its report of each step. The mission ends with it. |
+| `▸ Waves · 2 waves · 1/3 done · 1 running` | The waves, closed to how far their steps have got until pressed open (`▾`). |
+| `Wave 1` … | The waves as they stood when pressed, with their conditions. Each step is a rounded card, closed to one line (its skill and how it stands) until `▸` opens it: then its model and subagent type, and how it stands (waiting, running with its model requests, last tool and time, done, failed, stopped, or not run when the combo ended before it) and its tokens, then the first lines of its answer. |
+| `Other subagents` | Subagents whose tag names no step: one a step's skill sent out itself, or one the leader added. |
+| `[Clear All]` | Takes every mission off the tab. |
+
+Where no subagent can be started, the press asks your conversation to lead the combo instead, as a prompt of its own. Missions are kept in this session's memory only. `/slime-dashboard dungeon` opens the tab.
 
 ## Party
 
@@ -162,6 +178,7 @@ Each section above can be hidden or moved with Setting's `[Display]` and `[Order
 /slime-dashboard remove <skill>
 /slime-dashboard list                              the Skill Box's skills, by category
 /slime-dashboard weather                           read the sky now (wttr.in if Weather is On, else the clock), and say what came back
+/slime-dashboard dungeon                           open Dungeon, the Party Combo missions of this session
 ```
 
 Skills go in the Skill Box with `add`. Without `--category` a skill goes under **General**; `--desc` comes last and runs to the end of the line, drawn dim after the skill's name. Adding a skill again files it anew.

@@ -94,9 +94,18 @@ test('the leader is told each layer in order, its steps fanned out at once, and 
 test('Party Combo section builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
   mock.store(on)
   mock.clock(on)
+  // A press sends a leader subagent; the conversation gets nothing.
   const sent: string[] = []
+  const led: { description: string; model?: string }[] = []
+  on('agent.spawn', async (_$, e) => {
+    sent.push(e.prompt)
+    led.push({ description: e.description, model: e.model })
+    return { agentId: `lead${led.length}`, model: 'claude-sonnet-5-5' }
+  })
+  on('agent.list', async () => ({ value: led.map((l, i) => ({ id: `lead${i + 1}`, description: l.description, status: 'running' })) }) as never)
+  const submitted: string[] = []
   on('prompt.submit', async (_$, e) => {
-    sent.push(e.text)
+    submitted.push(e.text)
     return { text: e.text }
   })
   for (const args of ['add build --category Code', 'add unit-test --category Code']) {
@@ -142,10 +151,14 @@ test('Party Combo section builds a combo in a draft; [Save] keeps it and the Ski
   expect(sent).toHaveLength(1)
   expect(sent[0]).toContain('[Run-Test #1 2.1] skill /unit-test, model sonnet')
   expect(sent[0]).toContain('Input: all tests')
+  expect(sent[0]).toContain('However the Agent tool runs them, wait for every report')
+  expect(led[0]).toEqual({ description: '[Run-Test #1] lead the Party Combo', model: 'sonnet' })
+  expect(submitted).toHaveLength(0)
   // A trial edit left unsaved runs nothing new: the Skill Box runs the saved combo.
   await ui.press({ key: 'step-remove-1-0' })
   await ui.press({ key: 'combo-Run-Test' })
   expect(sent[1]).toContain('/unit-test')
+  expect(led[1]!.description).toBe('[Run-Test #2] lead the Party Combo')
   // The name folds the box and opens it again.
   await ui.press({ key: 'combo-fold' })
   expect(await ui.find({ key: 'wave-new' })).toBeUndefined()
@@ -158,5 +171,31 @@ test('Party Combo section builds a combo in a draft; [Save] keeps it and the Ski
   await ui.press({ key: 'combo-delete-yes' })
   expect(await ui.find({ key: 'combo-tab-Run-Test' })).toBeUndefined()
   expect(await ui.find({ key: 'combo-Run-Test' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a combo with no subagent to lead it asks the conversation to lead it instead', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  on('agent.spawn', async () => {
+    throw new Error('no subagents here')
+  })
+  const submitted: string[] = []
+  on('prompt.submit', async (_$, e) => {
+    submitted.push(e.text)
+    return { text: e.text }
+  })
+  await $.command.run({ command: PLUGIN, args: 'add build --category Code', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tree-toggle' })
+  await ui.press({ key: 'combo-new' })
+  await ui.press({ key: 'wave-add-0' })
+  await ui.press({ key: 'pick-0-build' })
+  await ui.press({ key: 'combo-save' })
+  await ui.press({ key: 'skills-toggle' })
+  await ui.press({ key: 'combo-Combo 1' })
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain('Run the Party Combo "Combo 1" (mission #1)')
+  expect(submitted[0]).not.toContain('However the Agent tool runs them')
   await ui.unmount()
 })

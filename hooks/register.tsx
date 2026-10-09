@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { AgentStatus, EngineInterface, Register } from 'claude-code'
+import type { AgentSpawnResult, AgentStatus, EngineInterface, Register } from 'claude-code'
 
 import { ASK, bubbleCell, CAMPFIRE_W, bubbleFill, colorsFrom, DEFAULT_COLORS, EMERGE_TICKS, FAMILIES, frame, hex, homeCx, modelInfo, PALETTE_IDS, PALETTES, partyLength, partyScrolling, PERF_LEVELS, perfFrom, respawnLength, ROWS, setColors, setPerformance, slotOf, step } from './scene'
 import type { Family, Perf, SlimeColors } from './scene'
@@ -10,9 +10,9 @@ import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, clockText, compact, N
 import type { CacheTtl, Tally } from './props'
 import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
-import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
+import { addLayer, addStep, agentLabel, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
 import type { Combo } from './combos'
-import { anyLive, attachRun, beginMission, combosOf, dateTimeText, elapsed, endMissions, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, updateRun } from './squad'
+import { agentsToFollow, anyLive, attachRun, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, updateRun, usageTokens } from './squad'
 import type { Mission, RunStatus, SquadRun } from './squad'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
 import { installedSha, manifestVersion, remoteSha, REMOTE_MANIFEST_URL, REMOTE_SHA_URL } from './freshness'
@@ -97,6 +97,8 @@ const RUN_LOOK: Record<RunStatus | 'waiting' | 'skipped', { mark: string; word: 
   stopped: { mark: '■', word: 'stopped', color: '#ff8c42' },
   skipped: { mark: '–', word: 'not run' },
 }
+// A leader, while its mission goes on (between its turns as well).
+const LEADING_LOOK = { mark: '◆', word: 'leading', color: '#c77dff' }
 // A step's model as Dungeon names it: `sonnet` to `Sonnet`.
 const modelName = (m: string) => m.charAt(0).toUpperCase() + m.slice(1)
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
@@ -278,6 +280,8 @@ const squadSeqAtom = atom({ plugin: 'slime-dashboard', key: 'squadSeq' } as cons
 // Dungeon's clock: moved once a second while a mission is going, so its
 // times and states are drawn afresh.
 const squadNowAtom = atom({ plugin: 'slime-dashboard', key: 'squadNow' } as const, 0)
+// The step cards opened in Dungeon (each closed until pressed), by key.
+const squadOpenAtom = atom({ plugin: 'slime-dashboard', key: 'squadOpen' } as const, [] as string[])
 
 // A change to the missions; one that finds nothing to change keeps them.
 async function setSquad($: EngineInterface, fn: (missions: Mission[]) => Mission[] | undefined) {
@@ -290,15 +294,26 @@ const editRun = ($: EngineInterface, id: string, fn: (r: SquadRun) => SquadRun) 
 // The engine's agent list settles the runs still running (a background
 // subagent's end comes no other way).
 async function checkSquad($: EngineInterface) {
-  const running = runsOf(await read($, squadAtom)).filter(r => r.status === 'running')
-  if (running.length === 0) return
-  const agents = await $.agent.list()
+  const missions = await read($, squadAtom)
+  const running = runsOf(missions).filter(r => r.status === 'running')
   const at = await $.clock.now()
+  if (running.length === 0 && !watching(missions, at, LEADER_WAKE_MS)) return
+  const agents = await $.agent.list()
+  // The subagents a leader (or a step) spawns run under this plugin's own
+  // spawn, whose agent.spawn hooks skip this one: the agent list names them.
+  for (const a of agentsToFollow(missions, agents, LEADER_MODEL)) await started($, a.id, a.model, a.description, a.parentId)
   for (const r of running) {
     const status = statusOfAgent(agents.find(a => a.id === r.id)?.status ?? '')
-    if (status) await editRun($, r.id, x => ({ ...x, status, endedAt: x.endedAt ?? at }))
+    if (!status) continue
+    await editRun($, r.id, x => ({ ...x, status, endedAt: x.endedAt ?? at }))
+    // A leader's end is its mission's, once nothing it sent out still runs.
+    const busy = agents.some(a => a.parentId === r.id && !statusOfAgent(a.status))
+    await setSquad($, missions => endLed(missions, r.id, status === 'completed' ? 'done' : status === 'stopped' ? 'stopped' : 'error', at, busy))
   }
 }
+
+// How long after its mission ended a leader may still be woken by a report.
+const LEADER_WAKE_MS = 120_000
 
 // Dungeon's tab, at the width Setting's Width chose.
 async function openSquad($: EngineInterface) {
@@ -1065,13 +1080,28 @@ async function deleteCombo($: EngineInterface, tab: string) {
   await selectCombo($, left[0] ?? '')
 }
 
-// A combo's button: the main model is asked to lead it, with the Skill Box's
-// prompt as its input; the pieces then clear.
+// A subagent started: its little slime, its line in Event Message, and its
+// place in Dungeon when it is a mission's.
+async function started($: EngineInterface, id: string, model: string, description: string, parent?: string) {
+  lastBud = Math.max(tick, lastBud + EMERGE_GAP)
+  budAt.set(id, lastBud)
+  const minion = { id, model, description }
+  await setMinions($, list => [...list, minion]).catch(() => {})
+  await logEvent($, `▶ Started ${agentLine(minion)}`)
+  const at = await $.clock.now().catch(() => 0)
+  const run: SquadRun = { id, description, model, status: 'running', steps: 0, startedAt: at }
+  await setSquad($, missions => attachRun(missions, run, parent)).catch(() => {})
+}
+
+// A combo's button: a leader subagent of its own is sent to lead it, with the
+// Skill Box's prompt as its input, so the person's conversation goes on
+// untouched; the pieces then clear. Where no subagent can be started, the main
+// model is asked to lead it instead.
 async function runCombo($: EngineInterface, combo: Combo) {
   const input = await skillInput($)
   // Its mission's number, in the prompt and in each step's tag.
   const id = nextMissionId(await read($, squadAtom), await read($, squadSeqAtom))
-  const text = comboPrompt(combo, input, id)
+  const text = comboPrompt(combo, input, id, true)
   if (text === undefined) {
     $.ui.toast(`Party Combo: ${combo.name} has no skill yet`)
     return
@@ -1079,12 +1109,22 @@ async function runCombo($: EngineInterface, combo: Combo) {
   $.ui.toast(`Party Combo: sending ${combo.name}`)
   try {
     await update($, squadSeqAtom, () => id)
-    await $.prompt.submit({ text })
-    await clearSkillInput($)
-    await logEvent($, `Combo sent: ${combo.name}`)
-    // A mission for Dungeon, which opens on it.
+    // A mission for Dungeon, which opens on it; its leader, once started,
+    // begins it.
     const at = await $.clock.now()
     await setSquad($, missions => [...missions, newMission(id, combo, at)])
+    // This plugin's own spawn runs every agent.spawn hook but its own: the
+    // leader is put on its mission here.
+    const description = `${leaderTag(combo.name, id)} the Party Combo`
+    const led = await $.agent.spawn({ prompt: text, description, subagentType: 'general-purpose', model: LEADER_MODEL }).catch((err): AgentSpawnResult => ({ deny: String(err) }))
+    if (led.deny === undefined) {
+      // Its id, else as the agent list names it.
+      const leader = led.agentId ?? (await $.agent.list().catch(() => [])).find(a => a.description === description)?.id
+      if (leader !== undefined) await started($, leader, led.model, description)
+      else await setSquad($, missions => beginMission(missions, combo.name, at, id))
+    } else await $.prompt.submit({ text: comboPrompt(combo, input, id)! })
+    await clearSkillInput($)
+    await logEvent($, `Combo sent: ${combo.name}`)
     await openSquad($).catch(() => undefined)
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error)
@@ -1376,18 +1416,8 @@ export const register: Register = on => {
   // Each subagent that starts gets a little slime, colored by its model.
   on('agent.spawn', async ($, e, next) => {
     const result = await next(e)
-    const id = result.agentId
     // A drawing hiccup must never get in the way of the spawn itself.
-    if (id !== undefined) {
-      lastBud = Math.max(tick, lastBud + EMERGE_GAP)
-      budAt.set(id, lastBud)
-      const minion = { id, model: result.model ?? e.parentModel, description: e.description }
-      await setMinions($, list => [...list, minion]).catch(() => {})
-      await logEvent($, `▶ Started ${agentLine(minion)}`)
-      const at = await $.clock.now().catch(() => 0)
-      const run: SquadRun = { id, description: e.description, model: minion.model, status: 'running', steps: 0, startedAt: at }
-      await setSquad($, missions => attachRun(missions, run)).catch(() => {})
-    }
+    if (result.agentId !== undefined) await started($, result.agentId, result.model ?? e.parentModel, e.description, e.parentAgentId).catch(() => {})
 
     return result
   }).catch(($, e, next) => next(e))
@@ -1395,7 +1425,12 @@ export const register: Register = on => {
   // Each model request of the main loop's turn is one iteration; a new one
   // also means the person has answered whatever was asked.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined) await editRun($, e.agentId, r => ({ ...r, steps: r.steps + 1 })).catch(() => {})
+    if (e.agentId !== undefined) {
+      // A run that ended its turn and is at work again (a leader woken by a
+      // report) runs once more.
+      await setSquad($, missions => reviveRun(missions, e.agentId!)).catch(() => {})
+      await editRun($, e.agentId, r => ({ ...r, steps: r.steps + 1 })).catch(() => {})
+    }
     if (e.agentId === undefined) {
       await update($, iterationAtom, () => e.index + 1).catch(() => {})
       if (e.effort !== undefined) await update($, effortAtom, () => String(e.effort)).catch(() => {})
@@ -1403,6 +1438,11 @@ export const register: Register = on => {
     }
 
     const result = yield* next(e)
+    // A subagent's request counts toward its run's tokens in Dungeon.
+    if (e.agentId !== undefined && result.usage) {
+      const n = usageTokens(result.usage)
+      await editRun($, e.agentId, r => ({ ...r, tokens: (r.tokens ?? 0) + n })).catch(() => {})
+    }
     // Each main-thread request leaves the cache fresh until now + TTL.
     if (e.agentId === undefined && result.usage) {
       const u = result.usage
@@ -1456,7 +1496,13 @@ export const register: Register = on => {
       const answer = e.reason === 'refusal' ? undefined : e.answer
       if (e.agentId !== undefined) {
         const status: RunStatus = e.reason === 'answer' ? 'completed' : e.reason === 'aborted' ? 'stopped' : 'failed'
-        await editRun($, e.agentId, r => ({ ...r, status, endedAt: at, ...(answer?.trim() ? { result: answer.trim() } : {}) })).catch(() => {})
+        const spent = e.usage ? usageTokens(e.usage) : 0
+        await editRun($, e.agentId, r => ({ ...r, status, endedAt: at, ...(answer?.trim() ? { result: answer.trim() } : {}), ...(spent ? { turnTokens: (r.turnTokens ?? 0) + spent } : {}) })).catch(() => {})
+        // A leader's end is its mission's, once nothing it sent out still runs.
+        const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
+        const agents = await $.agent.list().catch(() => [])
+        const busy = agents.some(a => a.parentId === e.agentId && !statusOfAgent(a.status))
+        await setSquad($, missions => endLed(missions, e.agentId!, outcome, at, busy)).catch(() => {})
       } else {
         const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
         await setSquad($, missions => endMissions(missions, outcome, at)).catch(() => {})
@@ -2467,6 +2513,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: SQUAD }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const missions = await read($, squadAtom)
+    const open = await read($, squadOpenAtom)
     await read($, squadNowAtom)
     const now = await $.clock.now()
     const paneColumns = e.surface === 'terminal' ? Math.max(12, Math.min(512, e.props.bodyColumns)) : OPEN.columns
@@ -2481,28 +2528,44 @@ export const register: Register = on => {
       )
     }
 
-    // A step's block: its mark and skill, what it is doing, and its answer.
-    const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number) => {
-      const look = run ? RUN_LOOK[run.status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
+    // A step's card: its mark and skill, and how it stands; opened (▸ / ▾),
+    // its model and type, what it is doing, and its answer. A leader's card is
+    // always open, and leading while its mission goes on.
+    const runBlock = (key: string, title: string, model: string, agent: string, run: SquadRun | undefined, ended: boolean, width: number, leads = false) => {
+      const leading = leads && !ended && run !== undefined
+      const look = leading ? LEADING_LOOK : run ? RUN_LOOK[run.status] : ended ? RUN_LOOK.skipped : RUN_LOOK.waiting
+      const tokens = run && runTokens(run) ? tokensText(runTokens(run)) : ''
       const doing = !run
         ? ''
         : run.status === 'running'
-          ? [`step ${run.steps}`, run.tool, elapsed(now - run.startedAt)].filter(Boolean).join(' · ')
-          : elapsed((run.endedAt ?? now) - run.startedAt)
+          ? [`step ${run.steps}`, run.tool, elapsed(now - run.startedAt), tokens].filter(Boolean).join(' · ')
+          : [elapsed((leading ? now : (run.endedAt ?? now)) - run.startedAt), tokens].filter(Boolean).join(' · ')
+      const isOpen = leads || open.includes(key)
       return (
         <Box key={key} flexDirection="column" borderStyle="round" borderColor={look.color ?? BORDER_DIM} paddingX={1} width={width}>
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" flexShrink={1} minWidth={0}>
-              <Text color={look.color} dimColor={look.color === undefined}>{`${look.mark} `}</Text>
+              {!leads && (
+                <Button
+                  key={`${key}-fold`}
+                  label={isOpen ? '▾' : '▸'}
+                  plain
+                  onPress={() => update($, squadOpenAtom, l => (l.includes(key) ? l.filter(k => k !== key) : [...l, key]))}
+                />
+              )}
+              <Text color={look.color} dimColor={look.color === undefined}>{`${leads ? '' : ' '}${look.mark} `}</Text>
               <Text bold wrap="truncate-end">{title}</Text>
             </Box>
             <Text color={look.color} dimColor={look.color === undefined}>{` ${look.word}`}</Text>
           </Box>
-          <Box flexDirection="row" justifyContent="space-between">
-            <Text dimColor wrap="truncate-end">{`  ${[model, agent].filter(Boolean).join(' · ')}`}</Text>
-            {doing !== '' && <Text dimColor>{` ${doing}`}</Text>}
-          </Box>
-          {run?.result &&
+          {isOpen && (
+            <Box flexDirection="row" justifyContent="space-between">
+              <Text dimColor wrap="truncate-end">{`  ${[model, agent].filter(Boolean).join(' · ')}`}</Text>
+              {doing !== '' && <Text dimColor>{` ${doing}`}</Text>}
+            </Box>
+          )}
+          {isOpen &&
+            run?.result &&
             resultLines(run.result, 3).map((line, i) => (
               <Text key={`${key}-r${i}`} dimColor wrap="wrap">{`  ${line}`}</Text>
             ))}
@@ -2514,12 +2577,26 @@ export const register: Register = on => {
       const ended = m.endedAt !== undefined
       const state = m.begunAt === undefined ? 'queued' : !ended ? 'running' : m.outcome === 'done' ? 'done' : m.outcome === 'stopped' ? 'stopped' : 'error'
       const took = m.begunAt !== undefined ? ` ${elapsed((m.endedAt ?? now) - m.begunAt)}` : ''
+      const spent = tokensOf([m])
+      const wavesKey = `mission-${m.id}-waves`
+      const wavesOpen = open.includes(wavesKey)
+      const steps = m.waves.flatMap(w => w.steps)
+      const count = (st: RunStatus) => steps.filter(x => x.run?.status === st).length
+      const progress = [
+        `${m.waves.length} wave${m.waves.length === 1 ? '' : 's'}`,
+        `${count('completed')}/${steps.length} done`,
+        count('running') ? `${count('running')} running` : '',
+        count('failed') ? `${count('failed')} failed` : '',
+        count('stopped') ? `${count('stopped')} stopped` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
       const inner = outer - 4
       return (
         <Box key={`mission-${m.id}`} flexDirection="column" borderStyle="round" borderColor={COMBO.banner} paddingX={1} width={outer}>
           {/* The combo's name, [x] at the right taking the mission off the
               tab; under it its number (as its tags carry it), when it was
-              sent, how it stands and how long. */}
+              sent, how it stands, how long, and its subagents' tokens. */}
           <Box flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" backgroundColor={COMBO.banner} paddingX={1} flexShrink={1} minWidth={0}>
               <Text bold color={COMBO.text} wrap="truncate-end">{m.combo}</Text>
@@ -2530,24 +2607,42 @@ export const register: Register = on => {
               <Text color={hex(STOP_RED)}>]</Text>
             </Box>
           </Box>
-          <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)} · ${state}${took}`}</Text>
-          {m.waves.map((w, wi) => (
-            <Box key={`mission-${m.id}-w${w.n}`} flexDirection="column">
-              {wi > 0 && <Text dimColor>{'  ↓'}</Text>}
-              <Text bold>
-                {`Wave ${w.n}`}
-                {w.steps.length > 1 && <Text dimColor>{' · all at once'}</Text>}
-              </Text>
-              {w.steps.map((st, si) =>
-                runBlock(`mission-${m.id}-${w.n}-${si}`, `/${st.skill}`, modelName(st.model), agentLabel(st.agent), st.run, ended, inner),
+          <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)} · ${state}${took}${spent ? ` · ${tokensText(spent)}` : ''}`}</Text>
+          {/* The subagent leading it, and in the end its report. */}
+          {m.leader && runBlock(`mission-${m.id}-lead`, 'Leader', modelInfo(m.leader.model ?? '').name, '', m.leader, ended, inner, true)}
+          {/* Waves, closed to one line (how far its steps have got) until
+              pressed open: each wave, its step cards and its condition, and
+              the subagents no step names. */}
+          <Box flexDirection="row">
+            <Button
+              key={`mission-${m.id}-waves`}
+              label={`${wavesOpen ? '▾' : '▸'} Waves`}
+              plain
+              onPress={() => update($, squadOpenAtom, l => (l.includes(wavesKey) ? l.filter(k => k !== wavesKey) : [...l, wavesKey]))}
+            />
+            <Text dimColor wrap="truncate-end">{` · ${progress}`}</Text>
+          </Box>
+          {wavesOpen && (
+            <Box flexDirection="column" paddingLeft={2}>
+              {m.waves.map((w, wi) => (
+                <Box key={`mission-${m.id}-w${w.n}`} flexDirection="column">
+                  {wi > 0 && <Text dimColor>{'  ↓'}</Text>}
+                  <Text bold>
+                    {`Wave ${w.n}`}
+                    {w.steps.length > 1 && <Text dimColor>{' · all at once'}</Text>}
+                  </Text>
+                  {w.steps.map((st, si) =>
+                    runBlock(`mission-${m.id}-${w.n}-${si}`, `/${st.skill}`, modelName(st.model), agentLabel(st.agent), st.run, ended, inner - 2),
+                  )}
+                  {w.condition && <Text dimColor wrap="wrap">{`◆ ${w.condition}`}</Text>}
+                </Box>
+              ))}
+              {m.others.length > 0 && (
+                <Box flexDirection="column">
+                  <Text bold>Other subagents</Text>
+                  {m.others.map((r, i) => runBlock(`mission-${m.id}-o${i}`, cleanSummary(r.description || 'subagent'), r.model ? modelInfo(r.model).name : '', '', r, ended, inner - 2))}
+                </Box>
               )}
-              {w.condition && <Text dimColor wrap="wrap">{`◆ ${w.condition}`}</Text>}
-            </Box>
-          ))}
-          {m.others.length > 0 && (
-            <Box flexDirection="column">
-              <Text bold>Other subagents</Text>
-              {m.others.map((r, i) => runBlock(`mission-${m.id}-o${i}`, cleanSummary(r.description || 'subagent'), r.model ? modelInfo(r.model).name : '', '', r, ended, inner))}
             </Box>
           )}
         </Box>

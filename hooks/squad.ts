@@ -18,6 +18,10 @@ export type SquadRun = {
   // Its model requests so far, and the tool it called last.
   steps: number
   tool?: string
+  // The tokens its model requests have taken in and given out so far; and as
+  // its turns' ends reported them, where its requests carried none.
+  tokens?: number
+  turnTokens?: number
   // Its final answer, once it gave one.
   result?: string
   startedAt: number
@@ -38,6 +42,8 @@ export type Mission = {
   outcome?: 'done' | 'stopped' | 'error'
   waves: SquadWave[]
   others: SquadRun[]
+  // The subagent leading it, when one does (else the person's own model did).
+  leader?: SquadRun
 }
 
 // A press of `combo`: its waves with a step in them, none of them run yet.
@@ -74,6 +80,12 @@ export function combosOf(prompt: string): { combo: string; mission?: number }[] 
 export const nextMissionId = (missions: readonly Mission[], last: number): number =>
   Math.max(last, ...missions.map(m => m.id)) + 1
 
+// `[Run-Test #3] lead` to the combo and mission it leads (combos.ts' leaderTag).
+export function leaderOf(description: string): { combo: string; mission: number } | undefined {
+  const m = description.match(/^\s*\[(.+?) #(\d+)\] lead\b/)
+  return m ? { combo: m[1]!, mission: Number(m[2]) } : undefined
+}
+
 const isLive = (m: Mission) => m.begunAt !== undefined && m.endedAt === undefined
 
 // The leader's turn took up `combo`: the mission its prompt numbers, else its
@@ -86,8 +98,10 @@ export function beginMission(missions: readonly Mission[], combo: string, at: nu
 // The leader's turn ended: its missions end with it, but for one with a
 // subagent still running. A step run in the background lets the leader's turn
 // end at once, and the leader takes the mission up again when it reports.
+// A mission with a leader of its own is not the person's turn's: it ends with
+// its leader (endLed).
 export function endMissions(missions: readonly Mission[], outcome: Mission['outcome'], at: number): Mission[] {
-  return missions.map(m => (isLive(m) && !runsOf([m]).some(r => r.status === 'running') ? { ...m, endedAt: at, outcome } : m))
+  return missions.map(m => (isLive(m) && !m.leader && !runsOf([m]).some(r => r.status === 'running') ? { ...m, endedAt: at, outcome } : m))
 }
 
 // Whether any mission is still going: Dungeon's clock then keeps ticking.
@@ -107,16 +121,39 @@ function attachTo(missions: readonly Mission[], i: number, tag: Tag, run: SquadR
   })
 }
 
-// A subagent started. A tag with a mission's number goes to that mission, and
-// only there. One without: to the step it names in the newest live mission of
-// that combo whose step is still free (a press never seen taken up begins
-// first); else, while a mission is live, among the newest one's others.
+// A subagent started. A leader's goes to the mission it leads, which begins.
+// A tag with a mission's number goes to that mission, and only there. A
+// subagent one of a mission's own spawned (`parent`) is among its others.
+// Else, a tag without a number: to the step it names in the newest live
+// mission of that combo whose step is still free (a press never seen taken up
+// begins first); else, while a mission is live, among the newest one's others.
 // Undefined when it is no mission's: not the squad's.
-export function attachRun(missions: readonly Mission[], run: SquadRun): Mission[] | undefined {
+export function attachRun(missions: readonly Mission[], run: SquadRun, parent?: string): Mission[] | undefined {
+  const leads = leaderOf(run.description)
+  if (leads) {
+    const i = missions.findIndex(m => m.id === leads.mission && m.combo === leads.combo)
+    if (i >= 0) {
+      return missions.map((m, k) => {
+        if (k !== i) return m
+        const { endedAt: _, outcome: __, ...rest } = m
+        return { ...rest, begunAt: m.begunAt ?? run.startedAt, leader: run }
+      })
+    }
+  }
   const tag = tagOf(run.description)
   if (tag?.mission !== undefined) {
     const i = missions.findIndex(m => m.id === tag.mission && m.combo === tag.combo)
     if (i >= 0) return attachTo(missions, i, tag, run)
+  }
+  if (parent !== undefined) {
+    const i = missions.findIndex(m => runsOf([m]).some(r => r.id === parent))
+    if (i >= 0) {
+      return missions.map((m, k) => {
+        if (k !== i) return m
+        const { endedAt: _, outcome: __, ...rest } = m
+        return { ...rest, others: [...m.others, run] }
+      })
+    }
   }
   if (tag && !missions.some(m => isLive(m) && m.combo === tag.combo) && missions.some(m => m.combo === tag.combo && m.begunAt === undefined))
     missions = beginMission(missions, tag.combo, run.startedAt)
@@ -148,13 +185,69 @@ export function updateRun(missions: readonly Mission[], id: string, fn: (r: Squa
     ...m,
     waves: m.waves.map(w => ({ ...w, steps: w.steps.map(s => (s.run ? { ...s, run: edit(s.run) } : s)) })),
     others: m.others.map(edit),
+    ...(m.leader ? { leader: edit(m.leader) } : {}),
   }))
   return found ? next : undefined
 }
 
-// Every run in the missions, steps and others alike.
+// Every run in the missions: leaders, steps and others alike.
 export const runsOf = (missions: readonly Mission[]): SquadRun[] =>
-  missions.flatMap(m => [...m.waves.flatMap(w => w.steps.flatMap(s => (s.run ? [s.run] : []))), ...m.others])
+  missions.flatMap(m => [...(m.leader ? [m.leader] : []), ...m.waves.flatMap(w => w.steps.flatMap(s => (s.run ? [s.run] : []))), ...m.others])
+
+// The agents a mission's subagents spawned that Dungeon has not seen start
+// (`agents` as the engine lists them), and the model each runs on as far as
+// its step says, else `fallback`.
+export function agentsToFollow(missions: readonly Mission[], agents: readonly { id: string; description: string; parentId?: string }[], fallback: string) {
+  const known = new Set(runsOf(missions).map(r => r.id))
+  return agents.flatMap(a => {
+    if (known.has(a.id) || a.parentId === undefined || !known.has(a.parentId)) return []
+    const tag = tagOf(a.description)
+    const m = missions.find(x => runsOf([x]).some(r => r.id === a.parentId))
+    const step = tag && m?.combo === tag.combo ? m.waves.find(w => w.n === tag.wave)?.steps[tag.step - 1] : undefined
+    return [{ id: a.id, description: a.description, parentId: a.parentId, model: step?.model ?? fallback }]
+  })
+}
+
+// The subagent under `id` ended its turn: a mission it led ends with it, but
+// not while a subagent of the mission still runs (`busy`: one the engine
+// lists that Dungeon may not have seen yet). A leader whose steps run in the
+// background ends its turn as it sends them, and is woken by their reports.
+export function endLed(missions: readonly Mission[], id: string, outcome: Mission['outcome'], at: number, busy = false): Mission[] | undefined {
+  const m = missions.find(x => x.leader?.id === id)
+  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running')) return undefined
+  return missions.map(x => (x === m ? { ...x, endedAt: at, outcome } : x))
+}
+
+// The subagent under `id` is at work again (a leader woken by its steps'
+// reports): running once more, and its mission with it.
+export function reviveRun(missions: readonly Mission[], id: string): Mission[] | undefined {
+  const i = missions.findIndex(m => runsOf([m]).some(r => r.id === id))
+  if (i < 0) return undefined
+  const m = missions[i]!
+  if (m.endedAt === undefined && runsOf([m]).find(r => r.id === id)?.status === 'running') return undefined
+  const { endedAt: _, outcome: __, ...rest } = m
+  const back = (r: SquadRun): SquadRun => {
+    if (r.id !== id) return r
+    const { endedAt: _e, ...live } = r
+    return { ...live, status: 'running' }
+  }
+  return missions.map((x, k) =>
+    k !== i
+      ? x
+      : {
+          ...rest,
+          waves: m.waves.map(w => ({ ...w, steps: w.steps.map(st => (st.run ? { ...st, run: back(st.run) } : st)) })),
+          others: m.others.map(back),
+          ...(m.leader ? { leader: back(m.leader) } : {}),
+        },
+  )
+}
+
+// Whether Dungeon should still look for subagents in the engine's list: a
+// mission with a leader is going, or ended within `within` ms (its leader may
+// yet be woken).
+export const watching = (missions: readonly Mission[], now: number, within: number): boolean =>
+  missions.some(m => m.leader !== undefined && (m.endedAt === undefined || now - m.endedAt < within))
 
 // What the engine's agent list says of a run: undefined while it still runs.
 export function statusOfAgent(status: string): RunStatus | undefined {
@@ -171,6 +264,26 @@ export function elapsed(ms: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}
+
+// What a model request's usage counts toward a run's tokens: all it took in,
+// cache read and written included, and all it gave out.
+export type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+export const usageTokens = (u: Usage): number =>
+  u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+
+// Every run's tokens in the missions, summed.
+export const tokensOf = (missions: readonly Mission[]): number => runsOf(missions).reduce((n, r) => n + runTokens(r), 0)
+
+// A run's tokens: its requests', else its turns'.
+export const runTokens = (r: SquadRun): number => r.tokens || r.turnTokens || 0
+
+// `812 tok`, `9.4k tok`, `31k tok`, `1.2M tok`.
+export function tokensText(n: number): string {
+  if (n < 1000) return `${n} tok`
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k tok`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k tok`
+  return `${(n / 1_000_000).toFixed(1)}M tok`
 }
 
 // A run's answer in a few lines: blank lines and markdown marks gone.

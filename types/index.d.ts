@@ -58,6 +58,7 @@ declare module 'claude-code' {
       squad: Mission[]
       squadNow: number
       squadSeq: number
+      squadOpen: string[]
       treeOpen: boolean
       comboSel: string
       comboPick: number
