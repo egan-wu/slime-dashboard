@@ -75,23 +75,23 @@ Below them: the cache hit rate, the cache's time to live (`1h` or `5m`: `(env)` 
 
 ## Skill Box
 
-<img src="docs/skills.png" width="340" alt="Skill Box open: Prompt for skill with two framed pieces, only the slow tests and 30, each with an x, above an empty field; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
+<img src="docs/skills.png" width="340" alt="Skill Box open: Prompt for skill with [Clear] at its right and two framed pieces, only slow tests and 30, each with ▲ ▼ x, above an empty field; General open in a rounded box with [▼][▲] at its right and [Unload], [Respawn] and [timer] each after a [▼]; Code closed; Party Combo open with two combos">
 
 | Button | What it does |
 | --- | --- |
-| Prompt for skill | Type, then Enter: the text becomes a piece in a frame of its own above the field, `x` at its right taking it out, and `[Clear]` at the title's right taking them all out. After Enter the field keeps the keys for the next piece. Type as many pieces as you like; the next skill you press is sent with them all, in order (and anything still in the field), and they clear. |
+| Prompt for skill | Type, then Enter: the text becomes a piece in a frame of its own above the field, `▲ ▼` at its right moving it up or down, `x` taking it out, and `[Clear]` at the title's right taking them all out. After Enter the field keeps the keys for the next piece. Type as many pieces as you like; the next skill you press is sent with them all, in order (and anything still in the field), and they clear. |
 | `▼ General` / `▸ Code (1)` | Opens or closes a category of skills; open, it is a rounded box with its skills inside, showing five rows at a time, `▲ ▼` scroll the rest. |
 | `[▼]` `[▲]` (right of a category) | Moves the category a place down or up, kept across sessions. |
 | `[▼]` (before a skill) | Trades places with the skill under it, kept across sessions. |
-| **Party Combo** | The combos saved in [Skill Tree](#skill-tree), each a button; pressed, it runs with the prompt as its input. |
+| **Party Combo** | The combos saved in the [Party Combo](#party-combo) section, each a button; pressed, it runs with the prompt as its input. |
 | `[Unload]`, `[timer]`, … | Runs the skill: `/timer "30"` with the prompt, `/timer` alone without. `[Unload]` is built in and runs `/compact`. |
 | `[Respawn]` | Built in: starts a new session (`/clear`), once confirmed. Pressed, its row asks `[Respawn]: [N]/[Y]`; `[N]` (grey under the pointer) backs out, `[Y]` (red under the pointer) clears. The old slime hops twice and leaps off to the right, turning half over; a great beam of light comes down in the middle of the scene, a ring of light runs out along the ground, glowing motes scatter, and a new slime takes shape in the beam, glints, pauses a second, then crawls to its place. |
 
 Skills are added with `/slime-dashboard add` (see [Usage](#usage)).
 
-## Skill Tree
+## Party Combo
 
-<img src="docs/tree.png" width="340" alt="Skill Tree open: tabs Run-Test and Nightly*, then Run-Test under a purple banner with [Rename]; three wave boxes, each with ▲ ▼ ✕ and its skills (a model swatch, the skill, its model and subagent type), a condition and an arrow between them, then + Wave and [Save] [Delete]">
+<img src="docs/tree.png" width="340" alt="Party Combo open: tabs Run-Test and Nightly*, then Run-Test under a purple banner with [Rename]; three wave boxes, each with ▲ ▼ ✕ and its skills (a model swatch, the skill, its model and subagent type), a condition and an arrow between them, then + Wave and [Save] [Delete]">
 
 Party Combos: your Skill Box skills chained into waves, each skill run by a subagent with the model and subagent type you pick, and Claude leading the whole run. The waves run in order; the skills of one wave all start at once, and the next wave waits for them all. For example, build, then unit-test, then check the result on Sonnet while Haiku archives the logs, at the same time.
 
@@ -140,7 +140,7 @@ What the cache did, kept on this computer for thirty days across sessions. `▼ 
 | Button | What it does |
 | --- | --- |
 | `[Update]` | Fetches the latest version from GitHub, updates the installed plugin, and reloads plugins in this session; how it went shows in a toast and in Event Message. A red `!` before it means GitHub has a newer version than the one running (checked each time the dashboard loads: at session start and at each reload). |
-| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Passive, Property, Skill Box, Skill Tree, Party, Event Message, Journal); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
+| `[Display]` | Opens a rounded box of checkboxes, one per section (Session, HP / MP / CP, Slime, Model buttons, Passive, Property, Skill Box, Party Combo, Party, Event Message, Journal); unticking one hides it, and the choice is kept across sessions. Pressed again, it closes the box. Setting always shows. |
 | `[Color]` | Opens a rounded box with one row per model family; pressing a family's color button moves it to the next of six (Purple, Red, Blue, Yellow, Green, Pink). Families may share a color. The choice colors the slimes, the model buttons and Party, and is kept across sessions; `[Default]` puts the original four back. Pressed again, it closes the box. |
 | `[Order]` | Opens a rounded box listing the sections top to bottom; each row's `[▲]` / `[▼]` moves that section a place up or down in the pane. A hidden section keeps its place (dim in the list). The order is kept across sessions; `[Default]` puts the original order back. Setting always stays last. Pressed again, it closes the box. |
 | `[Width] [-] 33 [+]` | Makes the docked pane a column narrower or wider (24–80), kept across sessions. A width you dragged the dock to by hand wins over it. |
@@ -170,7 +170,7 @@ Skills go in the Skill Box with `add`. Without `--category` a skill goes under *
 /slime-dashboard add run-unit-test --category Test --desc run the unit tests
 ```
 
-The skills you add, their order and your Party Combos are kept on this computer, shared by every project and session; windows open at once each see the others' changes when the Skill Box or Skill Tree opens, and never write them away; another computer starts with General's `[Unload]` alone.
+The skills you add, their order and your Party Combos are kept on this computer, shared by every project and session; windows open at once each see the others' changes when the Skill Box or the Party Combo section opens, and never write them away; another computer starts with General's `[Unload]` alone.
 
 ## Development
 

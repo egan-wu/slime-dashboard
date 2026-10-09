@@ -10,7 +10,7 @@ export const SECTIONS = [
   { id: 'passive', label: 'Passive' },
   { id: 'property', label: 'Property' },
   { id: 'skills', label: 'Skill Box' },
-  { id: 'tree', label: 'Skill Tree' },
+  { id: 'tree', label: 'Party Combo' },
   { id: 'monitor', label: 'Party' },
   { id: 'events', label: 'Event Message' },
   { id: 'journal', label: 'Journal' },

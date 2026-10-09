@@ -76,7 +76,7 @@ const swap = <T>(list: readonly T[], at: number, by: -1 | 1): T[] => {
   return next
 }
 
-// The edits the Skill Tree makes, each giving a new combo.
+// The edits the Party Combo section makes, each giving a new combo.
 export const addLayer = (c: Combo): Combo => ({ ...c, layers: [...c.layers, { steps: [] }] })
 export const moveLayer = (c: Combo, at: number, by: -1 | 1): Combo => ({ ...c, layers: swap(c.layers, at, by) })
 export const removeLayer = (c: Combo, at: number): Combo => ({ ...c, layers: c.layers.filter((_, i) => i !== at) })

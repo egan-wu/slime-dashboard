@@ -106,11 +106,17 @@ test('the Skill Box sends a skill with the typed prompt, the Property block open
     await ui.input({ key: 'skill-prompt-3', text: '   ' })
     expect(await piece('first part')).toBeDefined()
     expect(await piece('oops')).toBeDefined()
-    // [x] takes a piece out; a skill sends the rest, in order, then they clear.
+    // [x] takes a piece out; ▲ ▼ reorder them (nothing past either end); a
+    // skill sends them, in order, then they clear.
     await ui.press({ key: 'skill-piece-x-1' })
     expect(await piece('oops')).toBeUndefined()
+    await ui.press({ key: 'skill-piece-up-1' })
+    await ui.press({ key: 'skill-piece-up-0' })
+    await ui.press({ key: 'skill-piece-down-1' })
+    await ui.press({ key: 'skill-piece-down-0' })
+    await ui.press({ key: 'skill-piece-up-1' })
     await ui.press({ key: 'skill-run-unit-test' })
-    expect(ran.at(-1)).toBe('"first part\n\nsecond part"')
+    expect(ran.at(-1)).toBe('"second part\n\nfirst part"')
     expect(await piece('first part')).toBeUndefined()
     expect(await ui.find({ key: 'skill-piece-x-0' })).toBeUndefined()
     // [Clear] shows only with pieces, and takes them all out.
@@ -538,7 +544,7 @@ test('Setting: Order moves sections up and down; Default puts them back', async 
   expect(await ui.find({ key: 'order-up-events' })).toBeUndefined()
   await ui.press({ key: 'order' })
   expect(await titles()).toEqual(['Property ', 'Skill Box ', 'Party ', 'Event Message '])
-  // Past Party, Skill Tree and Skill Box.
+  // Past Party, Party Combo and Skill Box.
   await ui.press({ key: 'order-up-events' })
   await ui.press({ key: 'order-up-events' })
   await ui.press({ key: 'order-up-events' })

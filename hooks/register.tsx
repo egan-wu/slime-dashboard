@@ -78,7 +78,7 @@ const respawnConfirmAtom = atom({ plugin: 'slime-dashboard', key: 'respawnConfir
 let respawnAt: number | undefined
 const respawnTick = () => (respawnAt === undefined ? undefined : tick - respawnAt)
 const RESPAWN_RED = '#d62828'
-// The Skill Tree's combo: its name on a purple banner (and the box's edge),
+// The Party Combo section's combo: its name on a purple banner (and the box's edge),
 // and the green of [Save].
 const COMBO = { banner: '#5a189a', text: '#ffffff', save: '#38b000' }
 const vitalsAtom = atom({ plugin: 'slime-dashboard', key: 'vitals' } as const, FULL as Vitals)
@@ -101,7 +101,7 @@ const skillCatsClosedAtom = atom({ plugin: 'slime-dashboard', key: 'skillCatsClo
 // each category in order, and the categories in order.
 const skillOrderAtom = atom({ plugin: 'slime-dashboard', key: 'skillOrder' } as const, {} as Record<string, string[]>)
 const catOrderAtom = atom({ plugin: 'slime-dashboard', key: 'catOrder' } as const, [] as string[])
-// The Skill Tree: the Party Combos as saved (kept in the store across
+// The Party Combo section: the combos as saved (kept in the store across
 // sessions), whether it is open, the combo being edited (its tab: the name it
 // was saved under, or a new one's), its box folded to its name, the wave
 // whose + skill lists the skills to add (-1: none), the wave whose condition
@@ -790,7 +790,7 @@ async function setWaiting($: EngineInterface, value: boolean) {
 // The Skill Box's skills, their order and the Party Combos are one store
 // for every window open at once: each change is made to what the store holds
 // now, not to this window's copy, so one window never writes another's
-// changes away; and the copy is read afresh as the Skill Box or Skill Tree
+// changes away; and the copy is read afresh as the Skill Box or Party Combo section
 // opens.
 async function readShared($: EngineInterface) {
   const skills = skillsFrom(await $.store.get(SKILLS_KEY))
@@ -859,6 +859,20 @@ async function keepPiece($: EngineInterface, value: string) {
   await $.ui.focus({ requestId: PANE, key: skillPromptKey(pieces.length) }).catch(() => undefined)
 }
 
+// A piece's ▲ or ▼: it trades places with the one before or after (none past
+// either end), and the focus goes along with it, so it can be pressed again.
+async function movePiece($: EngineInterface, at: number, by: -1 | 1) {
+  const pieces = await read($, skillPiecesAtom)
+  const to = at + by
+  if (to < 0 || to >= pieces.length) return
+  await update($, skillPiecesAtom, ps => {
+    const next = [...ps]
+    ;[next[at], next[to]] = [next[to]!, next[at]!]
+    return next
+  })
+  await $.ui.focus({ requestId: PANE, key: `skill-piece-${by < 0 ? 'up' : 'down'}-${to}` }).catch(() => undefined)
+}
+
 // A skill's button: run it as the person would type it, with the Skill Box's
 // prompt after it in quotes when one is typed; the pieces then clear.
 async function runSkill($: EngineInterface, skill: Skill) {
@@ -906,7 +920,7 @@ async function namesBesides($: EngineInterface, tab: string) {
   return [...new Set([...saved, ...(await read($, comboFreshAtom)), ...drafts])].filter(n => n !== tab).map(name => ({ name, layers: [] }))
 }
 
-// Skill Tree's [+New]: a new combo with one empty wave, kept once saved.
+// Party Combo's [+New]: a new combo with one empty wave, kept once saved.
 async function newCombo($: EngineInterface) {
   const name = newComboName(await namesBesides($, ''))
   await update($, comboFreshAtom, f => [...f, name])
@@ -950,7 +964,7 @@ async function saveCombo($: EngineInterface, tab: string) {
   await update($, comboEditsAtom, ({ [tab]: _, ...rest }) => rest)
   await update($, comboSelAtom, () => draft.name)
   await update($, comboRenameAtom, () => false)
-  $.ui.toast(`Skill Tree: saved ${draft.name}`)
+  $.ui.toast(`Party Combo: saved ${draft.name}`)
   await logEvent($, `Combo saved: ${draft.name}`)
 }
 
@@ -1910,12 +1924,14 @@ export const register: Register = on => {
                   {skillPieces.length > 0 && <Button key="skill-pieces-clear" label="[Clear]" plain onPress={() => update($, skillPiecesAtom, () => [])} />}
                 </Box>
                 {/* Each piece kept with Enter, whole and wrapped in a frame of
-                    its own, [x] at its top right taking it out. */}
+                    its own, ▲ ▼ at its top right moving it, x taking it out. */}
                 {skillPieces.map((piece, i) => (
                   <Box key={`skill-piece-${i}`} flexDirection="row" alignItems="flex-start" columnGap={1} borderStyle="round" borderColor={BAR.mp} paddingX={1}>
                     <Box flexGrow={1} flexShrink={1} minWidth={0}>
                       <Text wrap="wrap">{piece}</Text>
                     </Box>
+                    <Button key={`skill-piece-up-${i}`} label="▲" plain dimColor onPress={() => movePiece($, i, -1)} />
+                    <Button key={`skill-piece-down-${i}`} label="▼" plain dimColor onPress={() => movePiece($, i, 1)} />
                     <Button key={`skill-piece-x-${i}`} label="x" plain dimColor onPress={() => update($, skillPiecesAtom, ps => ps.filter((_, k) => k !== i))} />
                   </Box>
                 ))}
@@ -1938,7 +1954,7 @@ export const register: Register = on => {
       </Box>
     )
 
-    // Skill Tree: the Party Combos, one edited at a time in a rounded box
+    // Party Combo: the combos, one edited at a time in a rounded box
     // under its name. Its waves, each in a box of its own, run in order, the
     // skills of a wave all at once, a row each; a wave moves, goes, takes
     // another skill (+ skill lists the Skill Box's) and a condition (◆, between
@@ -2131,7 +2147,7 @@ export const register: Register = on => {
     const tree = (
       <Box flexDirection="column">
         {rule}
-        {header(treeOpen ? 'Skill Tree' : `Skill Tree (${combos.length})`, 'tree-toggle', treeOpen, async () => {
+        {header(treeOpen ? 'Party Combo' : `Party Combo (${combos.length})`, 'tree-toggle', treeOpen, async () => {
           if (!treeOpen) await readShared($)
           await update($, treeOpenAtom, o => !o)
         })}

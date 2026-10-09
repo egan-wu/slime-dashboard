@@ -86,7 +86,7 @@ test('the leader is told each layer in order, its steps fanned out at once, and 
   expect(comboPrompt({ name: 'Empty', layers: [{ steps: [] }] }, '')).toBeUndefined()
 })
 
-test('Skill Tree builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
+test('Party Combo section builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
   mock.store(on)
   mock.clock(on)
   const sent: string[] = []

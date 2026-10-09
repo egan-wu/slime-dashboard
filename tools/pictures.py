@@ -195,7 +195,7 @@ def journal_rows():
 def skills_rows():
     return section(
         'Skill Box',
-        ('frame', [('split', [run('Prompt for skill', MP, True)], [run('[Clear]')]), ('frame', [('split', [run('only the slow tests')], [run('x', DIM)])], MP), ('frame', [('split', [run('30')], [run('x', DIM)])], MP), [run('› ')]], MP),
+        ('frame', [('split', [run('Prompt for skill', MP, True)], [run('[Clear]')]), ('frame', [('split', [run('only slow tests')], [run('▲ ▼ x', DIM)])], MP), ('frame', [('split', [run('30')], [run('▲ ▼ x', DIM)])], MP), [run('› ')]], MP),
         ('frame', [('split', [run('▼ General')], MOVE),
                    [run('[▼]'), run('[Unload]'), run(': compact context window', DIM)],
                    [run('[▼]'), run('[Respawn]'), run(': create new session', DIM)],
@@ -236,7 +236,7 @@ def tree_rows():
         [run('[Save] [Delete]')],
     ], PURPLE)
     return section(
-        'Skill Tree',
+        'Party Combo',
         [run(' '), run('[Run-Test]'), run('[Nightly*]', DIM), run('[+New]')],
         combo,
     )
