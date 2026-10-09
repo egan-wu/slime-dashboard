@@ -254,8 +254,11 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   const submitted: string[] = []
   on('prompt.submit', async (_$, e) => (submitted.push(e.text), { text: e.text }))
   const opened: string[] = []
+  const titles: string[] = []
+  on('ui.panes', async () => ({ value: opened.map(id => ({ id, title: '', isShown: true, hasFocus: false, isPlaced: true })) }) as never)
   on('ui.open', async (_$, e) => {
     opened.push(e.id)
+    if (e.id === 'dungeon') titles.push(e.title ?? '')
     return { value: { isPlaced: true } }
   })
   // The leader (s1) answers to the agent list: a plugin's own spawn comes back
@@ -290,20 +293,24 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   await ui.press({ key: 'combo-Run-Test' })
   expect(opened).toContain('dungeon')
   expect(submitted).toHaveLength(0)
+  // Its tab counts the missions not yet ended.
+  expect(titles.at(-1)).toBe('Dungeon (1)')
   await ui.unmount()
 
   const squad = await $.ui.mount({ ...SQUAD, surface: 'terminal' })
   const text = async (t: string | RegExp) => squad.find({ type: 'Text', text: t })
+  // Closed to its first two lines until its name is pressed.
+  expect((await squad.find({ key: 'mission-1-fold' }))?.text).toBe('▸ Run-Test')
+  expect(await text('Leader')).toBeUndefined()
+  await squad.press({ key: 'mission-1-fold' })
   expect((await squad.find({ key: 'mission-1-fold' }))?.text).toBe('▾ Run-Test')
   expect(await text('#1 · 1970-01-01 00:00')).toBeDefined()
   expect(await text('0')).toBeDefined()
   expect(await text('Leader')).toBeDefined()
   expect(await text('  Sonnet')).toBeDefined()
-  // The combo's name folds the mission to its first two lines, and opens it again.
+  // Pressed again, the name folds it back.
   await squad.press({ key: 'mission-1-fold' })
-  expect((await squad.find({ key: 'mission-1-fold' }))?.text).toBe('▸ Run-Test')
   expect(await text('#1 · 1970-01-01 00:00')).toBeDefined()
-  expect(await text('Leader')).toBeUndefined()
   expect(await squad.find({ key: 'mission-1-waves' })).toBeUndefined()
   await squad.press({ key: 'mission-1-fold' })
   expect(await text('Leader')).toBeDefined()
@@ -364,6 +371,7 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(' leading')).toBeUndefined()
   expect(await text('  Build OK; the check never ran.')).toBeDefined()
   expect((await squad.findAll({ type: 'Text', text: ' not run' })).length).toBe(2)
+  expect(titles.at(-1)).toBe('Dungeon')
   expect(await squad.find({ key: 'mission-1-lead-recall' })).toBeUndefined()
   expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeUndefined()
 
@@ -372,6 +380,8 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   await again.press({ key: 'combo-Run-Test' })
   await again.unmount()
   await $.agent.spawn({ prompt: 'Build.', description: '[Run-Test #2 1.1] build calc', parentAgentId: 's4' } as never)
+  expect(titles.at(-1)).toBe('Dungeon (1)')
+  await squad.press({ key: 'mission-2-fold' })
   await squad.press({ key: 'mission-2-lead-recall' })
   expect(stopped).toEqual(['s4', 's5'])
   expect(await text(' · 2 waves · 0/3 done · 1 stopped · 0s')).toBeDefined()

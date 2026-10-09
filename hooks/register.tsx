@@ -289,6 +289,24 @@ const squadOpenAtom = atom({ plugin: 'slime-dashboard', key: 'squadOpen' } as co
 // A change to the missions; one that finds nothing to change keeps them.
 async function setSquad($: EngineInterface, fn: (missions: Mission[]) => Mission[] | undefined) {
   await update($, squadAtom, missions => fn(missions) ?? missions)
+  await retitleSquad($).catch(() => {})
+}
+
+// Dungeon's tab counts the missions not yet ended: `Dungeon (2)`.
+const squadTitle = (missions: readonly Mission[]) => {
+  const going = missions.filter(m => m.endedAt === undefined).length
+  return going > 0 ? `${SQUAD_TITLE} (${going})` : SQUAD_TITLE
+}
+let shownSquadTitle: string | undefined
+
+// The tab's title anew when its count moved, and only while the tab is open
+// (an open of a closed id would open it).
+async function retitleSquad($: EngineInterface) {
+  const title = squadTitle(await read($, squadAtom))
+  if (title === shownSquadTitle) return
+  if (!(await $.ui.panes()).some(p => p.id === SQUAD)) return
+  shownSquadTitle = title
+  await $.ui.open({ id: SQUAD, title, columns: await read($, widthAtom) })
 }
 
 // A subagent of a mission moved on: one that is no mission's is left alone.
@@ -329,7 +347,8 @@ const LEADER_WAKE_MS = 120_000
 
 // Dungeon's tab, at the width Setting's Width chose.
 async function openSquad($: EngineInterface) {
-  return $.ui.open({ id: SQUAD, title: SQUAD_TITLE, columns: await read($, widthAtom) })
+  shownSquadTitle = squadTitle(await read($, squadAtom))
+  return $.ui.open({ id: SQUAD, title: shownSquadTitle, columns: await read($, widthAtom) })
 }
 
 // Setting's Weather: whether the sky is read from wttr.in, which places the
@@ -2651,9 +2670,10 @@ export const register: Register = on => {
       const ended = m.endedAt !== undefined
       const took = m.begunAt !== undefined && ended ? elapsed(m.endedAt! - m.begunAt) : ''
       const spent = tokensOf([m])
-      // The combo's name folds the mission to its first two lines, and opens it again.
+      // The combo's name opens the mission from its first two lines (closed
+      // until pressed), and folds it again.
       const foldKey = `mission-${m.id}-fold`
-      const folded = open.includes(foldKey)
+      const folded = !open.includes(foldKey)
       const wavesKey = `mission-${m.id}-waves`
       const wavesOpen = open.includes(wavesKey)
       const steps = m.waves.flatMap(w => w.steps)
@@ -2688,7 +2708,7 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="row" flexShrink={0}>
               <Text color={hex(STOP_RED)}>[</Text>
-              <Button key={`mission-x-${m.id}`} label="x" plain hover={{ scope: `mission-x-${m.id}`, color: hex(STOP_RED), bold: true }} onPress={() => update($, squadAtom, ms => ms.filter(x => x.id !== m.id))} />
+              <Button key={`mission-x-${m.id}`} label="x" plain hover={{ scope: `mission-x-${m.id}`, color: hex(STOP_RED), bold: true }} onPress={() => setSquad($, ms => ms.filter(x => x.id !== m.id))} />
               <Text color={hex(STOP_RED)}>]</Text>
             </Box>
           </Box>
@@ -2744,7 +2764,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {/* [Clear All] at the top right takes every mission off the tab. */}
         <Box flexDirection="row" justifyContent="flex-end" width={outer}>
-          <Button key="squad-clear" label="[Clear All]" plain onPress={() => update($, squadAtom, () => [])} />
+          <Button key="squad-clear" label="[Clear All]" plain onPress={() => setSquad($, () => [])} />
         </Box>
         {blocks}
       </Box>
