@@ -133,6 +133,11 @@ export const LEADER_MODEL: ComboModel = 'sonnet'
 export const ASK_TOOL_NAME = 'ask_person'
 export const ASK_TOOL = `mcp__slime-dashboard__${ASK_TOOL_NAME}`
 
+// Where the dashboard keeps a mission's step reports, and one step's in it:
+// `<home>/.claude/slime-dashboard/missions/3/w2-s1.md`, wave 2's first step.
+export const reportsDir = (home: string, mission: number) => `${home}/.claude/slime-dashboard/missions/${mission}`
+export const reportPath = (dir: string, layer: number, step: number) => `${dir}/w${layer + 1}-s${step + 1}.md`
+
 // The description a leader's Agent call starts with: `[Run-Test #3] lead`.
 export const leaderTag = (combo: string, mission: number) => `[${combo} #${mission}] lead`
 
@@ -141,13 +146,18 @@ export const leaderTag = (combo: string, mission: number) => `[${combo} #${missi
 // the conditions to judge after a layer. Empty layers are skipped; a combo
 // with no step at all has nothing to run. `mission` numbers this press;
 // `subagent` says the leader is one, which waits on each step in the
-// foreground and answers with the report.
-export function comboPrompt(combo: Combo, input: string, mission?: number, subagent = false): string | undefined {
+// foreground and answers with the report; `reports`, the folder the dashboard
+// keeps each step's report in, that the leader hands on by path, not retold.
+export function comboPrompt(combo: Combo, input: string, mission?: number, subagent = false, reports?: string): string | undefined {
   const layers = combo.layers.filter(l => l.steps.length > 0)
   if (layers.length === 0) return undefined
   const lines = [
     `Run the Party Combo "${combo.name}"${mission === undefined ? '' : ` (mission #${mission})`}. You lead it: hand each step below to a subagent with the Agent tool, with exactly the model and subagent_type it names, and do not do a step's work yourself.`,
-    'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and whatever earlier steps found that it needs.' +
+    'Run the waves in order. Dispatch every step of a wave at once, as parallel Agent calls in one message, and wait for all of them to report before you go on. Begin each Agent call\'s description with the step\'s tag. Tell each subagent to run its skill (the Skill tool, or the slash command) and report what came of it, and pass on the input and ' +
+      (reports ? 'the paths of the earlier reports it needs.' : 'whatever earlier steps found that it needs.') +
+      (reports
+        ? ` Each step's full report is saved as the step ends, at the path its line below names. Do not retell an earlier step's findings to a later step, in full or in summary: give it the paths of the reports it needs and tell it to read them itself; what you write to a step is its task, the input and those paths. Judge a condition on the reports as they reached you. Tell each subagent too: where its skill has a command print a long output, it may send that output to a file in ${reports}, named after its own report (\`w1-s1.out.txt\` beside \`w1-s1.md\`), and give the file's path in its report instead of copying the output out.`
+        : '') +
       (subagent
         ? ' However the Agent tool runs them, wait for every report of a wave before you go on. A step the person stopped is not run again: take it as failed, and judge the condition on that.' +
           ` Tell each subagent too: whatever it sends out (a subagent, a background command), it waits for before it reports; and where its skill would ask the person something, it asks with the ${ASK_TOOL} tool and waits for the answer, never guessing it. Ask the person that way yourself, if you must.`
@@ -158,7 +168,9 @@ export function comboPrompt(combo: Combo, input: string, mission?: number, subag
   combo.layers.forEach((layer, i) => {
     if (layer.steps.length === 0) return
     lines.push('', `Wave ${i + 1}${layer.steps.length > 1 ? ' (all at once)' : ''}:`)
-    layer.steps.forEach((s, j) => lines.push(`- ${stepTag(combo.name, i, j, mission)} skill /${s.skill}, model ${s.model}, subagent_type ${s.agent}`))
+    layer.steps.forEach((s, j) =>
+      lines.push(`- ${stepTag(combo.name, i, j, mission)} skill /${s.skill}, model ${s.model}, subagent_type ${s.agent}${reports ? `, report ${reportPath(reports, i, j)}` : ''}`),
+    )
     if (layer.condition?.trim()) lines.push(`Then, before anything else, judge what came back: ${layer.condition.trim()}`)
   })
   lines.push('', subagent ? 'When the combo ends, answer with each step\'s result in a line or two, and which waves did not run and why.' : 'When the combo ends, report each step\'s result in a line or two.')

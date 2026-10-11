@@ -1,8 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { comboPrompt } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, askingRun, clearedOf, missionCombo, missionState, stepStatus, coinText, settleLed, SETTLE_MS, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
-import type { SquadRun } from './squad'
+import { agentsToFollow, anyLive, askingRun, clearedOf, missionCombo, missionState, stepStatus, coinText, settleLed, STRAY_MS, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, missionCost, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
+import type { Mission, SquadRun } from './squad'
 
 const PLUGIN = 'slime-dashboard'
 const SQUAD = {
@@ -202,10 +202,11 @@ test('a leader begins its mission, keeps it going, and ends it; what its steps s
   expect(ms[1]!.endedAt).toBeUndefined()
   expect(endLed(ms, 'b', 'done', 6)).toBeUndefined()
   for (const id of ['b', 'h']) ms = updateRun(ms, id, r => ({ ...r, status: 'completed' }))!
-  // Done, but not until it has been quiet a while.
+  // Not while its leader still runs; done as its turn ends.
   expect(endLed(ms, 'L2', 'done', 9)).toBeUndefined()
-  ms = endLed(ms, 'L2', 'done', SETTLE_MS)!
-  expect(ms[1]).toMatchObject({ endedAt: SETTLE_MS, outcome: 'done' })
+  ms = updateRun(ms, 'L2', r => ({ ...r, status: 'completed', endedAt: 9 }))!
+  ms = endLed(ms, 'L2', 'done', 9)!
+  expect(ms[1]).toMatchObject({ endedAt: 9, outcome: 'done' })
   expect(runsOf([ms[1]!]).map(r => r.id)).toEqual(['L2', 'b', 'h'])
 })
 
@@ -221,16 +222,21 @@ test('a leader that sends its steps to the background ends its turn, is woken by
   // A seen step still runs: no end either.
   expect(endLed(ms, 'L', 'done', 7)).toBeUndefined()
   ms = updateRun(ms, 'b', r => ({ ...r, status: 'completed', endedAt: 8 }))!
+  // The build ended after the leader's last turn: its report has yet to be
+  // had, however quiet it stays (the leader may be writing the next wave).
+  expect(endLed(ms, 'L', 'done', 8)).toBeUndefined()
+  expect(settleLed(ms, 60_000)).toBeUndefined()
   // The build's report wakes the leader.
   ms = reviveRun(ms, 'L')!
   expect(ms[0]!.leader).toMatchObject({ status: 'running' })
   expect(ms[0]!.leader?.endedAt).toBeUndefined()
   expect(reviveRun(ms, 'L')).toBeUndefined()
-  const quiet = 8 + SETTLE_MS
-  expect(endLed(ms, 'L', 'done', quiet - 1)).toBeUndefined()
+  expect(endLed(ms, 'L', 'done', 11)).toBeUndefined()
+  // Its turn ends with every report had: the mission ends with it.
+  const quiet = 12
+  ms = updateRun(ms, 'L', r => ({ ...r, status: 'completed', endedAt: quiet }))!
   ms = endLed(ms, 'L', 'done', quiet)!
-  // It ended when its last run did, not when the quiet was out.
-  expect(ms[0]).toMatchObject({ endedAt: 8, outcome: 'done' })
+  expect(ms[0]).toMatchObject({ endedAt: quiet, outcome: 'done' })
   // Ended, it is still watched a while, then not.
   expect(watching(ms, quiet + 60_000, 120_000)).toBe(true)
   expect(watching(ms, quiet + 180_000, 120_000)).toBe(false)
@@ -239,18 +245,21 @@ test('a leader that sends its steps to the background ends its turn, is woken by
   expect(ms[0]!.endedAt).toBeUndefined()
 })
 
-test('a leader that answered while a helper still ran: its mission ends once the helper does', () => {
+test('a leader that answered while a helper still ran: its mission ends when woken again, or, never woken, past STRAY_MS', () => {
   let ms = attachRun([newMission(1, RUN_TEST, 0)], run('L', '[Run-Test #1] lead the Party Combo'))!
   ms = attachRun(ms, run('h', 'look around'), 'L')!
   ms = updateRun(ms, 'L', r => ({ ...r, status: 'completed', endedAt: 5 }))!
   expect(endLed(ms, 'L', 'done', 5)).toBeUndefined()
   expect(settleLed(ms, 6)).toBeUndefined()
   ms = updateRun(ms, 'h', r => ({ ...r, status: 'completed', endedAt: 7 }))!
-  // Quiet for SETTLE_MS since the helper ended: then it is done.
-  expect(settleLed(ms, 8)).toBeUndefined()
-  ms = settleLed(ms, 7 + SETTLE_MS)!
+  // The helper's report wakes the leader, whose turn's end ends the mission.
+  const woken = endLed(updateRun(ms, 'L', r => ({ ...r, endedAt: 9 }))!, 'L', 'done', 9)!
+  expect(woken[0]).toMatchObject({ endedAt: 9, outcome: 'done' })
+  // Never woken: it waits STRAY_MS from the helper's end, then ends then.
+  expect(settleLed(ms, 7 + STRAY_MS - 1)).toBeUndefined()
+  ms = settleLed(ms, 7 + STRAY_MS)!
   expect(ms[0]).toMatchObject({ endedAt: 7, outcome: 'done' })
-  expect(settleLed(ms, 8 + SETTLE_MS)).toBeUndefined()
+  expect(settleLed(ms, 8 + STRAY_MS)).toBeUndefined()
   // A leader that was stopped is not waited on.
   const stopped = updateRun(attachRun([newMission(1, RUN_TEST, 0)], run('L', '[Run-Test #1] lead the Party Combo'))!, 'L', r => ({ ...r, status: 'stopped', endedAt: 5 }))!
   expect(settleLed(stopped, 6)![0]).toMatchObject({ endedAt: 6, outcome: 'stopped' })
@@ -267,7 +276,7 @@ test('a step that left work in the background awaits it: running until woken and
   expect(woken[0]!.waves[0]!.steps[0]!.run).toMatchObject({ status: 'running' })
   expect(woken[0]!.waves[0]!.steps[0]!.run?.awaiting).toBeUndefined()
   // Its leader had its report and ended: the mission ends, the step done with it.
-  ms = endLed(ms, 'L', 'done', 5 + SETTLE_MS)!
+  ms = endLed(ms, 'L', 'done', 5)!
   expect(ms[0]).toMatchObject({ endedAt: 5, outcome: 'done' })
   expect(ms[0]!.waves[0]!.steps[0]!.run).toMatchObject({ status: 'completed', awaiting: false, endedAt: 5 })
 })
@@ -315,6 +324,10 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   on('store.get', async (_$, e) => ({ value: kept.get(e.key) }))
   on('store.set', async (_$, e) => (kept.set(e.key, JSON.parse(JSON.stringify(e.value))), { value: undefined }))
   const clock = mock.clock(on)
+  mock.env(on, { HOME: '/home/me' })
+  // The files written: each step's report, each mission's cost.
+  const written = new Map<string, string>()
+  on('fs.write', async (_$, e) => (written.set(e.path, e.text), { value: undefined }) as never)
   const submitted: string[] = []
   on('prompt.submit', async (_$, e) => (submitted.push(e.text), { text: e.text }))
   const opened: string[] = []
@@ -329,8 +342,10 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   // here without its id.
   let spawned = 0
   const agents: { id: string; description: string; status: string; parentId?: string }[] = []
+  const prompts: string[] = []
   on('agent.spawn', async (_$, e) => {
     const id = `s${++spawned}`
+    prompts.push(e.prompt)
     agents.push({ id, description: e.description, status: 'running' })
     return { agentId: id, model: e.model === 'sonnet' ? 'claude-sonnet-5-5' : 'claude-haiku-5-5' }
   })
@@ -345,6 +360,12 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
       if (a) a.status = 'killed'
     }
     return { result: 'ok' }
+  })
+  // The missions as last written, to read the cost breakdown from.
+  const squadNow: Mission[][] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.key === 'squad') squadNow.push(e.value as Mission[])
+    return next(e)
   })
   on('turn.complete', async () => ({ text: '' }))
   on('turn.step', async function* (_$, e) {
@@ -414,11 +435,19 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(/· 59k tok/)).toBeDefined()
   // The mission's coin counts them up: K and M.
   expect(await text('59K')).toBeDefined()
+  // The same two requests, by kind.
+  const saved = (squadNow.at(-1) ?? []).find(m => m.combo === 'Run-Test')!
+  const cost = missionCost(saved)
+  expect(cost.steps).toEqual({ input: 6, output: 400, cacheRead: 56_000, cacheCreation: 3_000, requests: 2 })
+  expect(cost.leader.requests).toBe(0)
   // The helper the build sent out is on the build's own card.
   expect(await text('Other subagents')).toBeUndefined()
   expect(await text('look around')).toBeDefined()
   // The build answers; its helper still runs, and the step with it.
   await $.turn.complete({ reason: 'answer', answer: 'Built calc.\nAll good.', durationMs: 1, turnId: 't1', isAborted: false, agentId: 's2' } as never)
+  // Its report is kept where the leader was told it would be; the helper's is not.
+  expect(prompts[0]).toContain('report /home/me/.claude/slime-dashboard/missions/1/w1-s1.md')
+  expect(written.get('/home/me/.claude/slime-dashboard/missions/1/w1-s1.md')).toBe('Built calc.\nAll good.\n')
   expect(await text('  Built calc.')).toBeDefined()
   expect(await text(' · 2 waves · 0/3 done · 1 running')).toBeDefined()
   expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeDefined()
@@ -427,15 +456,14 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(' leading')).toBeDefined()
   // The helper answers, then the leader: the mission ends with it, the later steps never reached.
   await $.turn.complete({ reason: 'answer', answer: 'Looked.', durationMs: 1, turnId: 't2', isAborted: false, agentId: 's3' } as never)
+  expect([...written.keys()].filter(k => k.includes('/missions/'))).toEqual(['/home/me/.claude/slime-dashboard/missions/1/w1-s1.md'])
   expect(await text(' done')).toBeDefined()
   expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
   expect(await text(' leading')).toBeDefined()
   await clock.set(1_000)
   await $.turn.complete({ reason: 'answer', answer: 'Build OK; the check never ran.', durationMs: 1, turnId: 't3', isAborted: false, agentId: 's1' } as never)
-  // Done once it has been quiet a while (a leader may be woken to send more).
-  await clock.advance(SETTLE_MS + 60_000)
-  // Done: how long it took follows its waves' count, up to its last run's end
-  // (not the quiet waited out after it).
+  // Done as its leader's turn ends, every report had: how long it took
+  // follows its waves' count.
   expect(await text(' · 2 waves · 1/3 done · 1s')).toBeDefined()
   expect(await text(' leading')).toBeUndefined()
   expect(await text('  Build OK; the check never ran.')).toBeDefined()
@@ -565,4 +593,21 @@ test('Dungeon: a step asks the person on its card; folded, a mission says how it
   // The [x] on a mission's banner is plain, not red.
   expect(await squad.find({ key: 'mission-x-1' })).toBeDefined()
   await squad.unmount()
+})
+
+test('missionCost: sums the leader, the steps and their helpers, with wall time', () => {
+  const u = (n: number) => ({ input: n, output: 2 * n, cacheRead: 3 * n, cacheCreation: 4 * n, requests: n })
+  let m = newMission(1, RUN_TEST, 0)
+  expect(missionCost(m).total).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0 })
+  expect(missionCost(m).ms).toBe(0)
+  m = { ...m, leader: { ...run('L', '[Run-Test #1 lead]'), usage: u(1), startedAt: 100, endedAt: 900 } }
+  m = attachRun(m && [m], { ...run('a', '[Run-Test #1 1.1] build'), model: 'opus', usage: u(2), startedAt: 200, endedAt: 500 }, 'L')![0]!
+  m = { ...m, others: [{ ...run('o', 'look'), usage: u(3), startedAt: 300 }] }
+  const c = missionCost(m)
+  expect(c.leader).toEqual(u(1))
+  expect(c.steps).toEqual(u(5))
+  expect(c.total).toEqual(u(6))
+  expect(c.perStep.map(p => [p.id, p.ms])).toEqual([['a', 300], ['o', 0]])
+  expect(c.perStep[0]!.model).toBe('opus')
+  expect(c.ms).toBe(800)
 })

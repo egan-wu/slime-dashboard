@@ -22,6 +22,8 @@ export type SquadRun = {
   // its turns' ends reported them, where its requests carried none.
   tokens?: number
   turnTokens?: number
+  // The same requests, by kind (cost measurement only).
+  usage?: RunUsage
   // Its final answer, once it gave one.
   result?: string
   startedAt: number
@@ -33,6 +35,9 @@ export type SquadRun = {
   // A question it put to the person (the ask_person tool), until answered.
   asking?: Ask
 }
+
+// What a run's requests took in and gave out, by kind, and how many there were.
+export type RunUsage = { input: number; output: number; cacheRead: number; cacheCreation: number; requests: number }
 
 export type Ask = { question: string; options?: string[] }
 
@@ -274,50 +279,51 @@ export function agentsToFollow(missions: readonly Mission[], agents: readonly { 
   })
 }
 
-// How long a mission whose leader ended its turn stays quiet (nothing running)
-// before it counts as done: a leader waiting on its steps' reports ends its
-// turn between waves, and is woken to send the next.
-export const SETTLE_MS = 10_000
-
-// When the last run of a mission ended.
-const lastEnd = (m: Mission) => Math.max(0, ...runsOf([m]).map(r => r.endedAt ?? 0))
-
-// Whether a mission that finished done has been quiet long enough to be done:
-// a stop or a failure is not waited on.
-const calm = (m: Mission, outcome: Mission['outcome'], at: number) => outcome !== 'done' || at - lastEnd(m) >= SETTLE_MS
-
-// When a mission that ended is said to have: a done one, when its last run
-// ended (the quiet it waited out is no work); else now.
-const endOf = (m: Mission, outcome: Mission['outcome'], at: number) => (outcome === 'done' && lastEnd(m) > 0 ? lastEnd(m) : at)
-
-// The subagent under `id` ended its turn: a mission it led ends with it, but
-// not while a subagent of the mission still runs (`busy`: one the engine
-// lists that Dungeon may not have seen yet), nor, if done, before it has been
-// quiet for SETTLE_MS (settleLed ends it then). A leader whose steps run in
-// the background ends its turn as it sends them, and is woken by their reports.
-export function endLed(missions: readonly Mission[], id: string, outcome: Mission['outcome'], at: number, busy = false): Mission[] | undefined {
-  const m = missions.find(x => x.leader?.id === id)
-  if (!m || m.endedAt !== undefined || busy || runsOf([m]).some(r => r.id !== id && r.status === 'running' && !r.awaiting) || !calm(m, outcome, at)) return undefined
-  const end = endOf(m, outcome, at)
-  return missions.map(x => (x === m ? settled({ ...x, endedAt: end, outcome }, end) : x))
+// Whether a mission its leader ended a turn of is through: nothing else of it
+// still runs, and, if done, the leader's turn ended after every other run of
+// it had. Each step's end reaches the leader as a report that wakes it for a
+// turn of its own, so a leader whose turn ended after the last of them has had
+// every report and sends nothing more; one whose turn ended before a run did
+// is woken by that report and ends a turn again. A stop or a failure is not
+// waited on. `at` given, a run that ended after the leader's last turn and
+// woke no turn of it for STRAY_MS no longer holds the mission open.
+function through(m: Mission, outcome: Mission['outcome'], at?: number): boolean {
+  const l = m.leader
+  if (!l || l.status === 'running') return false
+  const rest = runsOf([m]).filter(r => r.id !== l.id)
+  if (rest.some(r => r.status === 'running' && !r.awaiting)) return false
+  const last = Math.max(0, ...rest.map(r => r.endedAt ?? 0))
+  return outcome !== 'done' || last <= (l.endedAt ?? 0) || (at !== undefined && at - last >= STRAY_MS)
 }
 
-// Missions whose leader has ended its turn and that nothing else of runs any
-// more end now, as their leader did, once quiet for SETTLE_MS: what kept one
-// going (a step, a step's own helper) ended after the leader's last turn.
+// How long a run that ended after its leader's last turn may go without waking
+// it before its mission ends anyway: a safeguard, never the way a mission ends.
+export const STRAY_MS = 5 * 60_000
+
+// When a mission through is said to have ended: its leader's last turn's end,
+// or, past STRAY_MS, its last run's.
+const endOf = (m: Mission) => Math.max(m.leader?.endedAt ?? 0, ...runsOf([m]).map(r => r.endedAt ?? 0))
+
+// The subagent under `id` ended its turn: a mission it led ends with it, once
+// through, but not while a subagent the engine lists may not have been seen
+// yet (`busy`).
+export function endLed(missions: readonly Mission[], id: string, outcome: Mission['outcome'], at: number, busy = false): Mission[] | undefined {
+  const m = missions.find(x => x.leader?.id === id)
+  if (!m || m.endedAt !== undefined || busy || !through(m, outcome)) return undefined
+  return missions.map(x => (x === m ? settled({ ...x, endedAt: at, outcome }, at) : x))
+}
+
+// Missions whose leader has ended its turn end, once through, when its
+// leader's turn did: what kept one going (a run the engine's list ended)
+// ended since; or, past STRAY_MS, when the last run did.
 export function settleLed(missions: readonly Mission[], at: number): Mission[] | undefined {
   const outcome = (r: SquadRun): Mission['outcome'] => (r.status === 'completed' ? 'done' : r.status === 'stopped' ? 'stopped' : 'error')
-  const due = (m: Mission) =>
-    m.leader !== undefined &&
-    m.endedAt === undefined &&
-    m.leader.status !== 'running' &&
-    !runsOf([m]).some(r => r.status === 'running' && !r.awaiting) &&
-    calm(m, outcome(m.leader), at)
+  const due = (m: Mission) => m.leader !== undefined && m.endedAt === undefined && through(m, outcome(m.leader), at)
   if (!missions.some(due)) return undefined
   return missions.map(m => {
     if (!due(m)) return m
     const how = outcome(m.leader!)
-    const end = endOf(m, how, at)
+    const end = how === 'done' ? endOf(m) || at : at
     return settled({ ...m, endedAt: end, outcome: how }, end)
   })
 }
@@ -383,6 +389,31 @@ export function elapsed(ms: number): string {
 export type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
 export const usageTokens = (u: Usage): number =>
   u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+
+export const noUsage = (): RunUsage => ({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0, requests: 0 })
+
+// A run's usage with one more request's added.
+export const addRunUsage = (a: RunUsage | undefined, u: Usage): RunUsage => {
+  const b = a ?? noUsage()
+  return { input: b.input + u.input_tokens, output: b.output + u.output_tokens, cacheRead: b.cacheRead + u.cache_read_input_tokens, cacheCreation: b.cacheCreation + u.cache_creation_input_tokens, requests: b.requests + 1 }
+}
+
+const sumUsage = (rs: readonly RunUsage[]): RunUsage =>
+  rs.reduce((a, b) => ({ input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheCreation: a.cacheCreation + b.cacheCreation, requests: a.requests + b.requests }), noUsage())
+
+// A mission's cost: its leader's usage, its steps' (helpers and others too),
+// both, each step's own, and the wall time from the first run's start to the
+// last one's end.
+export function missionCost(m: Mission): { leader: RunUsage; steps: RunUsage; total: RunUsage; perStep: { id: string; description: string; model?: string; usage: RunUsage; ms: number }[]; ms: number } {
+  const rest = runsOf([{ ...m, leader: undefined }])
+  const perStep = rest.map(r => ({ id: r.id, description: r.description, model: r.model, usage: r.usage ?? noUsage(), ms: r.endedAt === undefined ? 0 : Math.max(0, r.endedAt - r.startedAt) }))
+  const leader = m.leader?.usage ?? noUsage()
+  const steps = sumUsage(perStep.map(p => p.usage))
+  const all = runsOf([m])
+  const ends = all.map(r => r.endedAt).filter((t): t is number => t !== undefined)
+  const ms = all.length && ends.length ? Math.max(0, Math.max(...ends) - Math.min(...all.map(r => r.startedAt))) : 0
+  return { leader, steps, total: sumUsage([leader, steps]), perStep, ms }
+}
 
 // Every run's tokens in the missions, summed.
 export const tokensOf = (missions: readonly Mission[]): number => runsOf(missions).reduce((n, r) => n + runTokens(r), 0)

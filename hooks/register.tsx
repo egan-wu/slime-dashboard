@@ -10,9 +10,9 @@ import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, clockText, compact, N
 import type { CacheTtl, Tally } from './props'
 import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
-import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
+import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, reportPath, reportsDir, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, SETTLE_MS, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, runTokens, statusOfAgent, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, addRunUsage, missionCost, runTokens, statusOfAgent, tagOf, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
 import type { Mission, MissionState, RunStatus, SquadRun } from './squad'
 import { DUNGEON_ROWS, dungeonFrame } from './dungeon'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
@@ -312,6 +312,39 @@ async function setSquad($: EngineInterface, fn: (missions: Mission[]) => Mission
   const cleared = clearedOf(await read($, squadAtom), await read($, squadClearedAtom))
   if (cleared) await update($, squadClearedAtom, () => cleared)
   await retitleSquad($).catch(() => {})
+  await writeCosts($).catch(() => {})
+}
+
+// A step's report, whole, where its mission's prompt told the leader it would
+// be (combos.ts' reportPath): a run that took a step's tag, the leader's own
+// and untagged ones aside.
+async function keepReport($: EngineInterface, id: string, answer: string) {
+  const missions = await read($, squadAtom)
+  const m = missions.find(x => runsOf([x]).some(r => r.id === id))
+  const run = m && runsOf([m]).find(r => r.id === id)
+  const tag = run && !leaderOf(run.description) ? tagOf(run.description) : undefined
+  if (!m || !tag || tag.combo !== m.combo || (tag.mission !== undefined && tag.mission !== m.id)) return
+  if (!m.waves.find(w => w.n === tag.wave)?.steps[tag.step - 1]) return
+  const home = await $.env.get('HOME')
+  if (!home) return
+  await $.fs.write(reportPath(reportsDir(home, m.id), tag.wave - 1, tag.step - 1), answer.trimEnd() + '\n')
+}
+
+// Each ended mission's cost, a file of its own under ~/.claude/slime-dashboard/costs,
+// written again whenever it ends anew or more requests come in after.
+const costsWritten = new Map<number, string>()
+async function writeCosts($: EngineInterface) {
+  for (const m of await read($, squadAtom)) {
+    if (m.endedAt === undefined) continue
+    const cost = missionCost(m)
+    const mark = `${m.endedAt}:${cost.total.requests}`
+    if (costsWritten.get(m.id) === mark) continue
+    costsWritten.set(m.id, mark)
+    const home = await $.env.get('HOME')
+    if (!home) return
+    const record = { mission: m.id, combo: m.combo, outcome: m.outcome, sentAt: m.sentAt, endedAt: m.endedAt, leaderModel: m.leader?.model, ...cost }
+    await $.fs.write(`${home}/.claude/slime-dashboard/costs/${m.id}.json`, JSON.stringify(record, null, 2) + '\n')
+  }
 }
 
 // Dungeon's tab counts the missions not yet ended: `Dungeon (2)`; and
@@ -1246,7 +1279,9 @@ async function runCombo($: EngineInterface, combo: Combo, again?: { input: strin
   const input = again ? again.input : await skillInput($)
   // Its mission's number, in the prompt and in each step's tag.
   const id = nextMissionId(await read($, squadAtom), await read($, squadSeqAtom))
-  const text = comboPrompt(combo, input, id, true)
+  const home = await $.env.get('HOME').catch(() => undefined)
+  const reports = home ? reportsDir(home, id) : undefined
+  const text = comboPrompt(combo, input, id, true, reports)
   if (text === undefined) {
     $.ui.toast(`Party Combo: ${combo.name} has no skill yet`)
     return
@@ -1267,7 +1302,7 @@ async function runCombo($: EngineInterface, combo: Combo, again?: { input: strin
       const leader = led.agentId ?? (await $.agent.list().catch(() => [])).find(a => a.description === description)?.id
       if (leader !== undefined) await started($, leader, led.model, description)
       else await setSquad($, missions => beginMission(missions, combo.name, at, id))
-    } else await $.prompt.submit({ text: comboPrompt(combo, input, id)! })
+    } else await $.prompt.submit({ text: comboPrompt(combo, input, id, false, reports)! })
     if (!again) await clearSkillInput($)
     await logEvent($, `Combo sent${again ? ' again' : ''}: ${combo.name}`)
     await openSquad($).catch(() => undefined)
@@ -1601,7 +1636,7 @@ export const register: Register = on => {
     // A subagent's request counts toward its run's tokens in Dungeon.
     if (e.agentId !== undefined && result.usage) {
       const n = usageTokens(result.usage)
-      await editRun($, e.agentId, r => ({ ...r, tokens: (r.tokens ?? 0) + n })).catch(() => {})
+      await editRun($, e.agentId, r => ({ ...r, tokens: (r.tokens ?? 0) + n, usage: addRunUsage(r.usage, result.usage!) })).catch(() => {})
     }
     // Each main-thread request leaves the cache fresh until now + TTL.
     if (e.agentId === undefined && result.usage) {
@@ -1701,22 +1736,24 @@ export const register: Register = on => {
     {
       const at = await $.clock.now().catch(() => 0)
       const answer = e.reason === 'refusal' ? undefined : e.answer
+      // A step's report is kept before it reaches its leader, which hands it on by path.
+      if (e.agentId !== undefined && answer?.trim()) await keepReport($, e.agentId, answer).catch(() => {})
       if (e.agentId !== undefined) {
         const status: RunStatus = e.reason === 'answer' ? 'completed' : e.reason === 'aborted' ? 'stopped' : 'failed'
         const spent = e.usage ? usageTokens(e.usage) : 0
         await editRun($, e.agentId, r => {
-          const said = { ...(answer?.trim() ? { result: answer.trim() } : {}), ...(spent ? { turnTokens: (r.turnTokens ?? 0) + spent } : {}) }
+          const said = { ...(answer?.trim() ? { result: answer.trim() } : {}), ...(spent ? { turnTokens: (r.turnTokens ?? 0) + spent } : {}),
+            // Its usage from its turns, where no request of its own reached turn.step (a step under a leader).
+            ...(e.usage && !r.tokens ? { usage: addRunUsage(r.usage, e.usage) } : {}) }
           // A step whose turn ended with work in the background awaits it, still running.
           if (status === 'completed' && r.background && !leaderOf(r.description)) return { ...r, ...said, background: false, awaiting: true, tool: 'background work' }
           return { ...r, ...said, status, endedAt: at, background: false, awaiting: false }
         }).catch(() => {})
-        // A leader's end is its mission's, once nothing it sent out still runs.
+        // A leader's end is its mission's, once it has had every report of what it sent out.
         const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
         const agents = await $.agent.list().catch(() => [])
         const busy = agents.some(a => a.parentId === e.agentId && !statusOfAgent(a.status))
         await setSquad($, missions => endLed(missions, e.agentId!, outcome, at, busy)).catch(() => {})
-        // A leader's mission is done once quiet a while: looked at again then.
-        if ((await read($, squadAtom).catch(() => [])).some(m => m.leader?.id === e.agentId && m.endedAt === undefined)) $.clock.after(SETTLE_MS + 200, () => void checkSquad($).catch(() => {}))
       } else {
         const outcome = e.reason === 'answer' ? 'done' : e.reason === 'aborted' ? 'stopped' : 'error'
         await setSquad($, missions => endMissions(missions, outcome, at)).catch(() => {})

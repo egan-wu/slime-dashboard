@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { addLayer, addStep, agentLabel, forSteps, comboPrompt, combosFrom, comboSummary, cycleAgent, cycleModel, moveLayer, newComboName, removeLayer, removeStep, renameOk, setCondition, stepTag } from './combos'
+import { addLayer, addStep, agentLabel, forSteps, comboPrompt, combosFrom, comboSummary, cycleAgent, cycleModel, moveLayer, newComboName, removeLayer, removeStep, renameOk, reportsDir, setCondition, stepTag } from './combos'
 import type { Combo } from './combos'
 
 const PLUGIN = 'slime-dashboard'
@@ -89,6 +89,22 @@ test('the leader is told each layer in order, its steps fanned out at once, and 
   expect(numbered).toContain('Run the Party Combo "Run-Test" (mission #7).')
   expect(numbered).toContain('- [Run-Test #7 3.2] skill /archive')
   expect(stepTag('Run-Test', 0, 0, 7)).toBe('[Run-Test #7 1.1]')
+})
+
+test('given a reports folder, the leader hands earlier reports on by path, not retold', () => {
+  const dir = reportsDir('/home/me', 7)
+  expect(dir).toBe('/home/me/.claude/slime-dashboard/missions/7')
+  const text = comboPrompt(runTest(), '', 7, true, dir)!
+  expect(text).toContain(`- [Run-Test #7 3.2] skill /archive, model haiku, subagent_type general-purpose, report ${dir}/w3-s2.md`)
+  expect(text).toContain('Do not retell an earlier step')
+  expect(text).toContain('the paths of the earlier reports it needs')
+  expect(text).not.toContain('whatever earlier steps found')
+  // A long output goes beside the step's report, in the mission's folder.
+  expect(text).toContain(`send that output to a file in ${dir}, named after its own report`)
+  // Without one, the leader passes on what it needs, as before.
+  const plain = comboPrompt(runTest(), '', 7, true)!
+  expect(plain).toContain('whatever earlier steps found that it needs')
+  expect(plain).not.toContain('report /')
 })
 
 test('Party Combo section builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
