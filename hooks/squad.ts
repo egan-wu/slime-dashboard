@@ -5,6 +5,7 @@
 // step (the leader left it out, or added a task of its own) is kept apart.
 // Kept in this session's memory only.
 
+import { conditionsOf } from './combos'
 import type { Combo, ComboModel } from './combos'
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'stopped'
@@ -24,8 +25,10 @@ export type SquadRun = {
   turnTokens?: number
   // The same requests, by kind (cost measurement only).
   usage?: RunUsage
-  // Its final answer, once it gave one.
+  // Its final answer, once it gave one; and how many reports it has given,
+  // one a round where a condition took the combo back to its wave.
   result?: string
+  rounds?: number
   startedAt: number
   endedAt?: number
   // It sent work to the background this turn (a shell, a monitor): its turn's
@@ -45,7 +48,7 @@ export type Ask = { question: string; options?: string[] }
 // them), or that took its tag again: the same step's work.
 export type SquadStep = { skill: string; model: ComboModel; agent: string; run?: SquadRun; helpers?: SquadRun[] }
 // `n` is the wave's number in the combo, as its steps' tags count it.
-export type SquadWave = { n: number; condition?: string; steps: SquadStep[] }
+export type SquadWave = { n: number; conditions?: string[]; steps: SquadStep[] }
 
 export type Mission = {
   id: number
@@ -63,7 +66,17 @@ export type Mission = {
   others: SquadRun[]
   // The subagent leading it, when one does (else the person's own model did).
   leader?: SquadRun
+  // Each Rally (Dungeon's ⚑ on a wave of an ended mission), oldest first: the
+  // wave it ran again from, when, and the runs it set aside (the waves' from
+  // there on, the others, and a leader that could not be woken), kept for
+  // the mission's cost and record.
+  rallies?: Rally[]
+  // The condition its leader said held last in each wave, as `wave#place`
+  // (`1#2`: wave 1's second), as its log's `Condition: wave 1 #2` lines say.
+  held?: string[]
 }
+
+export type Rally = { from: number; at: number; runs: SquadRun[]; leader?: SquadRun }
 
 // A press of `combo` (with `input`): its waves with a step in them, none of
 // them run yet.
@@ -71,7 +84,7 @@ export function newMission(id: number, combo: Combo, at: number, input?: string)
   const waves = combo.layers.flatMap((layer, i): SquadWave[] =>
     layer.steps.length === 0
       ? []
-      : [{ n: i + 1, ...(layer.condition?.trim() ? { condition: layer.condition.trim() } : {}), steps: layer.steps.map(s => ({ ...s })) }],
+      : [{ n: i + 1, ...(conditionsOf(layer).length ? { conditions: conditionsOf(layer) } : {}), steps: layer.steps.map(s => ({ ...s })) }],
   )
   return { id, combo: combo.name, sentAt: at, waves, others: [], ...(input?.trim() ? { input } : {}) }
 }
@@ -82,7 +95,7 @@ export function missionCombo(m: Mission): Combo {
   const last = Math.max(0, ...m.waves.map(w => w.n))
   const layers = Array.from({ length: last }, (_, i) => {
     const w = m.waves.find(x => x.n === i + 1)
-    return w ? { steps: w.steps.map(({ skill, model, agent }) => ({ skill, model, agent })), ...(w.condition ? { condition: w.condition } : {}) } : { steps: [] }
+    return w ? { steps: w.steps.map(({ skill, model, agent }) => ({ skill, model, agent })), ...(w.conditions ? { conditions: [...w.conditions] } : {}) } : { steps: [] }
   })
   return { name: m.combo, layers }
 }
@@ -228,6 +241,121 @@ export function updateRun(missions: readonly Mission[], id: string, fn: (r: Squa
   }
   const next = missions.map(m => mapRuns(m, edit))
   return found ? next : undefined
+}
+
+// The wave a leader's answer says its combo fell at (`Mission: fell at wave 2`,
+// its last line as combos.ts' prompt asks); undefined when cleared or unsaid.
+export function fellAtOf(answer: string | undefined): number | undefined {
+  const m = answer?.match(/^\W*Mission:\s*fell at wave (\d+)/im)
+  return m ? Number(m[1]) : undefined
+}
+
+// The condition a leader's log says held last in each wave: its latest
+// `Condition: wave N #K` line for that wave (`#0`, none held, leaves the wave
+// out), as `N#K`, in wave order.
+export function heldOf(texts: readonly string[]): string[] {
+  const last = new Map<number, string>()
+  for (const t of texts) for (const m of t.matchAll(/^\W*Condition:\s*wave\s*(\d+)\s*#(\d+)/gim)) last.set(Number(m[1]), m[2]!)
+  return [...last].filter(([, k]) => k !== '0').sort(([a], [b]) => a - b).map(([n, k]) => `${n}#${k}`)
+}
+
+// The mission `id` with the conditions its leader said held; undefined when
+// they are as they were.
+export function setHeld(missions: readonly Mission[], id: number, held: readonly string[]): Mission[] | undefined {
+  const m = missions.find(x => x.id === id)
+  if (!m || (m.held ?? []).join() === held.join()) return undefined
+  return missions.map(x => (x === m ? { ...x, held: [...held] } : x))
+}
+
+// A Rally of the ended mission `id` from wave `from`: the runs of that wave
+// and those after it, and its others, are set aside, so the steps are free for
+// the subagents sent again. The mission stays ended until its leader is at
+// work again (reviveRun), or a new one takes it up (retireLeader, then
+// attachRun). Undefined when there is no such ended mission.
+export function rallyWaves(missions: readonly Mission[], id: number, from: number, at: number): Mission[] | undefined {
+  const m = missions.find(x => x.id === id)
+  if (!m || m.endedAt === undefined) return undefined
+  const set = [...m.waves.filter(w => w.n >= from).flatMap(w => w.steps.flatMap(stepRuns)), ...m.others]
+  const waves = m.waves.map(w => (w.n < from ? w : { ...w, steps: w.steps.map(({ skill, model, agent }) => ({ skill, model, agent })) }))
+  const { recalled: _r, ...rest } = m
+  return missions.map(x => (x !== m ? x : { ...rest, waves, others: [], rallies: [...(m.rallies ?? []), { from, at, runs: set }] }))
+}
+
+// The mission's leader could not be woken for its Rally: set aside with it,
+// so the leader sent anew takes the mission up as it begins.
+export function retireLeader(missions: readonly Mission[], id: number): Mission[] | undefined {
+  const m = missions.find(x => x.id === id)
+  const last = m?.rallies?.at(-1)
+  if (!m || !m.leader || !last) return undefined
+  const { leader, begunAt: _, ...rest } = m
+  return missions.map(x => (x !== m ? x : { ...rest, rallies: [...m.rallies!.slice(0, -1), { ...last, leader }] }))
+}
+
+// Every run a mission spent tokens on: its own, and those its Rallies set aside.
+export const spentRuns = (m: Mission): SquadRun[] => [...runsOf([m]), ...(m.rallies ?? []).flatMap(r => [...(r.leader ? [r.leader] : []), ...r.runs])]
+
+// A mission's record, for trace.json beside its reports: how it was sent and
+// how it ended, and every run of it by wave and step (their ids name each
+// agent's own transcript), the Rallies' set-aside runs included; answers left
+// out, as the reports and the leader's log hold them.
+export function missionTrace(m: Mission, reports?: (wave: number, step: number) => string) {
+  const run = ({ result: _, asking: __, ...r }: SquadRun) => r
+  return {
+    mission: m.id,
+    combo: m.combo,
+    ...(m.input !== undefined ? { input: m.input } : {}),
+    sentAt: m.sentAt,
+    begunAt: m.begunAt,
+    endedAt: m.endedAt,
+    outcome: m.outcome,
+    fellAt: fellAtOf(m.leader?.result),
+    held: m.held ?? [],
+    leader: m.leader && run(m.leader),
+    waves: m.waves.map(w => ({
+      n: w.n,
+      ...(w.conditions ? { conditions: w.conditions } : {}),
+      steps: w.steps.map((s, i) => ({
+        skill: s.skill,
+        model: s.model,
+        agent: s.agent,
+        ...(reports ? { report: reports(w.n - 1, i) } : {}),
+        run: s.run && run(s.run),
+        helpers: (s.helpers ?? []).map(run),
+      })),
+    })),
+    others: m.others.map(run),
+    rallies: (m.rallies ?? []).map(r => ({ from: r.from, at: r.at, leader: r.leader && run(r.leader), runs: r.runs.map(run) })),
+  }
+}
+
+// What the leader's log is made of: its conversation's messages, as
+// $.session.messages gives them.
+export type LogMessage = { role: 'user' | 'assistant'; text: string; toolUses: { tool: string; input: Record<string, unknown> }[]; toolResults?: { text?: string }[] }
+
+const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n)} …` : text)
+
+// The leader's log, leader.md beside its mission's reports: what it was told
+// and what it said, its judgments, each subagent it sent out, and what came
+// back to it (clipped, the reports being whole in their own files).
+export function leaderLog(m: Mission, messages: readonly LogMessage[]): string {
+  const lines = [`# Mission #${m.id} · ${m.combo} · the leader's log`, '']
+  for (const msg of messages) {
+    const said = msg.text.trim()
+    if (msg.role === 'assistant') {
+      if (said) lines.push('## Leader', '', said, '')
+      for (const u of msg.toolUses) {
+        const i = u.input
+        const what = u.tool === 'Agent' ? [i.description, i.model, i.subagent_type].filter(x => typeof x === 'string').join(' · ') : clip(JSON.stringify(i), 200)
+        lines.push(`- ${u.tool}: ${what}`)
+      }
+      if (msg.toolUses.length) lines.push('')
+    } else {
+      const back = (msg.toolResults ?? []).map(r => r.text?.trim() ?? '').filter(Boolean)
+      if (said) lines.push('## To the leader', '', clip(said, 4000), '')
+      for (const b of back) lines.push('## Back to the leader', '', clip(b, 600), '')
+    }
+  }
+  return lines.join('\n').trimEnd() + '\n'
 }
 
 // Every run in the missions: leaders, steps, their helpers and others alike.
@@ -405,18 +533,19 @@ const sumUsage = (rs: readonly RunUsage[]): RunUsage =>
 // both, each step's own, and the wall time from the first run's start to the
 // last one's end.
 export function missionCost(m: Mission): { leader: RunUsage; steps: RunUsage; total: RunUsage; perStep: { id: string; description: string; model?: string; usage: RunUsage; ms: number }[]; ms: number } {
-  const rest = runsOf([{ ...m, leader: undefined }])
+  const leaders = [...(m.leader ? [m.leader] : []), ...(m.rallies ?? []).flatMap(r => (r.leader ? [r.leader] : []))]
+  const rest = spentRuns(m).filter(r => !leaders.includes(r))
   const perStep = rest.map(r => ({ id: r.id, description: r.description, model: r.model, usage: r.usage ?? noUsage(), ms: r.endedAt === undefined ? 0 : Math.max(0, r.endedAt - r.startedAt) }))
-  const leader = m.leader?.usage ?? noUsage()
+  const leader = sumUsage(leaders.map(l => l.usage ?? noUsage()))
   const steps = sumUsage(perStep.map(p => p.usage))
-  const all = runsOf([m])
+  const all = spentRuns(m)
   const ends = all.map(r => r.endedAt).filter((t): t is number => t !== undefined)
   const ms = all.length && ends.length ? Math.max(0, Math.max(...ends) - Math.min(...all.map(r => r.startedAt))) : 0
   return { leader, steps, total: sumUsage([leader, steps]), perStep, ms }
 }
 
 // Every run's tokens in the missions, summed.
-export const tokensOf = (missions: readonly Mission[]): number => runsOf(missions).reduce((n, r) => n + runTokens(r), 0)
+export const tokensOf = (missions: readonly Mission[]): number => missions.flatMap(spentRuns).reduce((n, r) => n + runTokens(r), 0)
 
 // A run's tokens: its requests', else its turns'.
 export const runTokens = (r: SquadRun): number => r.tokens || r.turnTokens || 0

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { addLayer, addStep, agentLabel, forSteps, comboPrompt, combosFrom, comboSummary, cycleAgent, cycleModel, moveLayer, newComboName, removeLayer, removeStep, renameOk, reportsDir, setCondition, stepTag } from './combos'
+import { addLayer, addStep, agentLabel, forSteps, comboPrompt, combosFrom, comboSummary, cycleAgent, cycleModel, moveLayer, newComboName, removeLayer, removeStep, renameOk, reportsDir, rallyDir, rallyMessage, setCondition, addCondition, removeCondition, conditionsOf, stepTag } from './combos'
 import type { Combo } from './combos'
 
 const PLUGIN = 'slime-dashboard'
@@ -26,7 +26,7 @@ const runTest = (): Combo => {
   c = addStep(addLayer(c), 1, 'unit-test')
   c = addStep(addStep(addLayer(c), 2, 'check'), 2, 'archive')
   c = cycleModel(c, 2, 0)
-  c = setCondition(c, 2, 'If Pass, report done and stop; if Fail, report Fail and go on.')
+  c = setCondition(addCondition(c, 2), 2, 0, 'If Pass, report done and stop; if Fail, report Fail and go on.')
   return addStep(addLayer(c), 3, 'debug-log')
 }
 
@@ -39,12 +39,16 @@ test('a combo is built a layer and a skill at a time', () => {
   expect(cycleModel(cycleModel(cycleModel(cycleModel(c, 0, 0), 0, 0), 0, 0), 0, 0).layers[0]!.steps[0]!.model).toBe('haiku')
   expect(cycleAgent(c, 0, 0, ['general-purpose', 'Explore']).layers[0]!.steps[0]!.agent).toBe('Explore')
   expect(cycleAgent(c, 0, 0, ['Explore', 'Plan']).layers[0]!.steps[0]!.agent).toBe('Explore')
-  // Waves move and go; a step goes; an emptied condition goes.
+  // Waves move and go; a step goes; a condition goes, the list with its last.
   expect(moveLayer(c, 0, 1).layers.map(l => l.steps[0]!.skill)).toEqual(['unit-test', 'build', 'check', 'debug-log'])
   expect(moveLayer(c, 0, -1)).toEqual(c)
   expect(removeLayer(c, 3).layers).toHaveLength(3)
   expect(removeStep(c, 2, 0).layers[2]!.steps.map(s => s.skill)).toEqual(['archive'])
-  expect(setCondition(c, 2, '  ').layers[2]!.condition).toBeUndefined()
+  expect(removeCondition(c, 2, 0).layers[2]!.conditions).toBeUndefined()
+  const two = setCondition(addCondition(c, 2), 2, 1, 'else go back to wave 1')
+  expect(two.layers[2]!.conditions).toEqual(['If Pass, report done and stop; if Fail, report Fail and go on.', 'else go back to wave 1'])
+  expect(removeCondition(two, 2, 0).layers[2]!.conditions).toEqual(['else go back to wave 1'])
+  expect(conditionsOf({ conditions: [' a ', '  ', 'b'] })).toEqual(['a', 'b'])
 })
 
 test('steps take general, explore, plan and the person\'s own agents', () => {
@@ -68,12 +72,17 @@ test('what the store kept is cleaned up', () => {
   expect(combosFrom(undefined)).toEqual([])
   expect(
     combosFrom([
-      { name: 'A', layers: [{ steps: [{ skill: 'x', model: 'gpt', agent: '' }, { model: 'opus' }], condition: ' ' }] },
+      { name: 'A', layers: [{ steps: [{ skill: 'x', model: 'gpt', agent: '' }, { model: 'opus' }], conditions: [' ', 3] }] },
+      // An earlier version kept one condition, a string.
+      { name: 'Old', layers: [{ steps: [{ skill: 'y', model: 'opus', agent: 'Plan' }], condition: 'if Fail, stop' }] },
       { name: 'A', layers: [] },
       { name: '' },
       'B',
     ]),
-  ).toEqual([{ name: 'A', layers: [{ steps: [{ skill: 'x', model: 'haiku', agent: 'general-purpose' }] }] }])
+  ).toEqual([
+    { name: 'A', layers: [{ steps: [{ skill: 'x', model: 'haiku', agent: 'general-purpose' }] }] },
+    { name: 'Old', layers: [{ steps: [{ skill: 'y', model: 'opus', agent: 'Plan' }], conditions: ['if Fail, stop'] }] },
+  ])
 })
 
 test('the leader is told each layer in order, its steps fanned out at once, and the conditions', () => {
@@ -83,6 +92,9 @@ test('the leader is told each layer in order, its steps fanned out at once, and 
   expect(text).toContain(`Wave 3 (all at once):\n- ${stepTag('Run-Test', 2, 0)} skill /check, model sonnet, subagent_type general-purpose\n- [Run-Test 3.2] skill /archive, model haiku`)
   expect(text).toContain('judge what came back: If Pass, report done and stop; if Fail, report Fail and go on.')
   expect(text.indexOf('Wave 1:')).toBeLessThan(text.indexOf('Wave 2:'))
+  // More than one: judged in order, the first that holds deciding.
+  const many = comboPrompt(setCondition(addCondition(runTest(), 2), 2, 1, 'If it fails 3 times, stop'), '')!
+  expect(many).toContain('against these conditions in order; the first that holds decides what you do:\n  1. If Pass, report done and stop; if Fail, report Fail and go on.\n  2. If it fails 3 times, stop')
   expect(comboPrompt({ name: 'Empty', layers: [{ steps: [] }] }, '')).toBeUndefined()
   // A press's mission number goes in its first line and every tag.
   const numbered = comboPrompt(runTest(), '', 7)!
@@ -105,6 +117,43 @@ test('given a reports folder, the leader hands earlier reports on by path, not r
   const plain = comboPrompt(runTest(), '', 7, true)!
   expect(plain).toContain('whatever earlier steps found that it needs')
   expect(plain).not.toContain('report /')
+})
+
+test('a combo sent back to an earlier wave wakes the subagents that ran it', () => {
+  const text = comboPrompt(runTest(), '', 7, true)!
+  expect(text).toContain('waking the subagents that ran them, with SendMessage')
+  expect(text).toContain('not reuse or change its last result')
+  // It says which condition held, a line Dungeon reads; and leaves the reports to the dashboard.
+  expect(text).toContain('`Condition: wave N #K`')
+  expect(comboPrompt(runTest(), '', 7, true, reportsDir('/home/me', 7))!).toContain('do not ask a step to write it, nor check that it did')
+  // With a reports folder, the leader hears of each step's rounds file, to hand on where needed.
+  expect(comboPrompt(runTest(), '', 7, true, reportsDir('/home/me', 7))!).toContain('`.rounds.md` file beside it (`w1-s1.rounds.md`)')
+  expect(text).not.toContain('.rounds.md')
+})
+
+test('a leader ends its answer saying whether the mission cleared or the wave it fell at', () => {
+  expect(comboPrompt(runTest(), '', 7, true)!).toContain('`Mission: fell at wave N`')
+  expect(comboPrompt(runTest(), '', 7, false)!).not.toContain('Mission: fell')
+})
+
+test('a Rally: the leader woken runs again from its wave; a new leader reads the log first', () => {
+  const dir = reportsDir('/home/me', 7)
+  const before = rallyDir(dir, 1)
+  expect(before).toBe(`${dir}/rally-1`)
+  const woken = rallyMessage(runTest(), 7, 3, before)
+  expect(woken).toContain('again from wave 3')
+  expect(woken).toContain('The waves before wave 3 stand as they ended')
+  expect(woken).toContain(`old reports of the waves run again are in ${before}`)
+  expect(woken).toContain('`Mission: fell at wave N`')
+  const fresh = comboPrompt(runTest(), 'go', 7, true, dir, { from: 3, before })!
+  expect(fresh).toContain(`First read ${before}/leader.md`)
+  expect(fresh).toContain('Wave 1 (ran before; not run again):')
+  expect(fresh).toContain(`report ${dir}/w1-s1.md`)
+  expect(fresh).toContain('Wave 3 (all at once):')
+  expect(fresh).toContain('If Pass')
+  // A wave that stands is not judged again; a press that is no Rally says none.
+  expect(comboPrompt(runTest(), '', 7, true, dir, { from: 4, before })!).not.toContain('If Pass')
+  expect(comboPrompt(runTest(), '', 7, true, dir)!).not.toContain('This is a Rally')
 })
 
 test('Party Combo section builds a combo in a draft; [Save] keeps it and the Skill Box runs it under Party Combo', async ($, on) => {
@@ -144,10 +193,18 @@ test('Party Combo section builds a combo in a draft; [Save] keeps it and the Ski
   await ui.press({ key: 'step-model-1-0' })
   expect((await ui.find({ key: 'step-model-1-0' }))?.text).toBe('Sonnet')
   expect((await ui.find({ key: 'step-agent-1-0' }))?.text).toBe('general')
-  await ui.press({ key: 'wave-cond-1' })
-  await ui.input({ key: 'cond-1', text: 'if Fail, say so', kind: 'submit' })
-  expect((await ui.find({ key: 'wave-cond-1' }))?.text).toBe('◆ if Fail, say so')
-  expect((await ui.find({ key: 'wave-cond-0' }))?.text).toBe('◆ + condition')
+  await ui.press({ key: 'wave-cond-add-1' })
+  await ui.input({ key: 'cond-1-0', text: 'if Fail, say so', kind: 'submit' })
+  expect((await ui.find({ key: 'wave-cond-1-0' }))?.text).toBe('◆ if Fail, say so')
+  // A second one under it; one left empty goes.
+  await ui.press({ key: 'wave-cond-add-1' })
+  await ui.input({ key: 'cond-1-1', text: 'if 3 fails, stop', kind: 'submit' })
+  expect((await ui.find({ key: 'wave-cond-1-1' }))?.text).toBe('◆ if 3 fails, stop')
+  await ui.press({ key: 'wave-cond-add-1' })
+  await ui.input({ key: 'cond-1-2', text: '  ', kind: 'submit' })
+  expect(await ui.find({ key: 'wave-cond-1-2' })).toBeUndefined()
+  expect(await ui.find({ key: 'wave-cond-0-0' })).toBeUndefined()
+  expect((await ui.find({ key: 'wave-cond-add-0' }))?.text).toBe('◆ + condition')
   // An empty wave goes when the combo is saved.
   await ui.press({ key: 'wave-new' })
   expect(await ui.find({ key: 'wave-remove-2' })).toBeDefined()
@@ -167,6 +224,7 @@ test('Party Combo section builds a combo in a draft; [Save] keeps it and the Ski
   expect(sent).toHaveLength(1)
   expect(sent[0]).toContain('[Run-Test #1 2.1] skill /unit-test, model sonnet')
   expect(sent[0]).toContain('Input: all tests')
+  expect(sent[0]).toContain('  1. if Fail, say so\n  2. if 3 fails, stop')
   expect(sent[0]).toContain('However the Agent tool runs them, wait for every report')
   expect(led[0]).toEqual({ description: '[Run-Test #1] lead the Party Combo', model: 'sonnet' })
   expect(submitted).toHaveLength(0)

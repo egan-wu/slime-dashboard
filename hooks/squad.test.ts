@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { comboPrompt } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, askingRun, clearedOf, missionCombo, missionState, stepStatus, coinText, settleLed, STRAY_MS, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, missionCost, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
+import { fellAtOf, heldOf, setHeld, leaderLog, missionTrace, rallyWaves, retireLeader, spentRuns, agentsToFollow, anyLive, askingRun, clearedOf, missionCombo, missionState, stepStatus, coinText, settleLed, STRAY_MS, attachRun, reviveRun, runTokens, watching, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, leaderOf, missionCost, newMission, nextMissionId, resultLines, runsOf, statusOfAgent, tagOf, tokensOf, tokensText, updateRun, usageTokens } from './squad'
 import type { Mission, SquadRun } from './squad'
 
 const PLUGIN = 'slime-dashboard'
@@ -24,13 +24,13 @@ const RUN_TEST: Combo = {
   name: 'Run-Test',
   layers: [
     { steps: [{ skill: 'demo-build', model: 'haiku', agent: 'general-purpose' }] },
-    { steps: [], condition: 'never shown: no steps' },
+    { steps: [], conditions: ['never shown: no steps'] },
     {
       steps: [
         { skill: 'demo-test', model: 'sonnet', agent: 'general-purpose' },
         { skill: 'demo-check', model: 'opus', agent: 'Explore' },
       ],
-      condition: 'if Fail, say so',
+      conditions: ['if Fail, say so'],
     },
   ],
 }
@@ -41,7 +41,7 @@ test('a mission keeps the combo as pressed; tags put each subagent on its step',
   const m = newMission(1, RUN_TEST, 1000)
   // The empty wave is left out; the others keep their numbers, as tags count them.
   expect(m.waves.map(w => w.n)).toEqual([1, 3])
-  expect(m.waves[1]!.condition).toBe('if Fail, say so')
+  expect(m.waves[1]!.conditions).toEqual(['if Fail, say so'])
   expect(tagOf('[Run-Test 3.2] check the result')).toEqual({ combo: 'Run-Test', wave: 3, step: 2 })
   expect(tagOf('[My Combo 1.1] x')).toEqual({ combo: 'My Combo', wave: 1, step: 1 })
   expect(tagOf('[My Combo #12 2.3] x')).toEqual({ combo: 'My Combo', mission: 12, wave: 2, step: 3 })
@@ -328,6 +328,11 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   // The files written: each step's report, each mission's cost.
   const written = new Map<string, string>()
   on('fs.write', async (_$, e) => (written.set(e.path, e.text), { value: undefined }) as never)
+  on('fs.read', async (_$, e) => {
+    const text = written.get((e as { path: string }).path)
+    if (text === undefined) throw new Error('no such file')
+    return { value: text } as never
+  })
   const submitted: string[] = []
   on('prompt.submit', async (_$, e) => (submitted.push(e.text), { text: e.text }))
   const opened: string[] = []
@@ -449,6 +454,15 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(prompts[0]).toContain('report /home/me/.claude/slime-dashboard/missions/1/w1-s1.md')
   expect(written.get('/home/me/.claude/slime-dashboard/missions/1/w1-s1.md')).toBe('Built calc.\nAll good.\n')
   expect(await text('  Built calc.')).toBeDefined()
+  const rounds = '/home/me/.claude/slime-dashboard/missions/1/w1-s1.rounds.md'
+  expect(written.get(rounds)).toMatch(/^## Round 1 · \d{4}-\d\d-\d\d \d\d:\d\d\n\nBuilt calc.\nAll good.\n$/)
+  // Woken again for another round (a condition took the combo back to its
+  // wave): the report is its latest, the rounds file keeps both, and its card counts them.
+  await $.turn.complete({ reason: 'answer', answer: 'Built calc again.', durationMs: 1, turnId: 't1b', isAborted: false, agentId: 's2' } as never)
+  expect(written.get('/home/me/.claude/slime-dashboard/missions/1/w1-s1.md')).toBe('Built calc again.\n')
+  expect(written.get(rounds)).toContain('All good.\n\n## Round 2 · ')
+  expect(written.get(rounds)).toMatch(/Built calc again.\n$/)
+  expect(await text(/ · 2 rounds$/)).toBeDefined()
   expect(await text(' · 2 waves · 0/3 done · 1 running')).toBeDefined()
   expect(await squad.find({ key: 'mission-1-1-0-stop' })).toBeDefined()
   // The person's own turn ends: the mission is the leader's, and goes on.
@@ -456,7 +470,7 @@ test('Dungeon: a pressed combo sends its leader, opens its tab and follows each 
   expect(await text(' leading')).toBeDefined()
   // The helper answers, then the leader: the mission ends with it, the later steps never reached.
   await $.turn.complete({ reason: 'answer', answer: 'Looked.', durationMs: 1, turnId: 't2', isAborted: false, agentId: 's3' } as never)
-  expect([...written.keys()].filter(k => k.includes('/missions/'))).toEqual(['/home/me/.claude/slime-dashboard/missions/1/w1-s1.md'])
+  expect([...written.keys()].filter(k => k.includes('/missions/'))).toEqual(['/home/me/.claude/slime-dashboard/missions/1/w1-s1.md', rounds])
   expect(await text(' done')).toBeDefined()
   expect(await text(' · 2 waves · 1/3 done')).toBeDefined()
   expect(await text(' leading')).toBeDefined()
@@ -610,4 +624,106 @@ test('missionCost: sums the leader, the steps and their helpers, with wall time'
   expect(c.perStep.map(p => [p.id, p.ms])).toEqual([['a', 300], ['o', 0]])
   expect(c.perStep[0]!.model).toBe('opus')
   expect(c.ms).toBe(800)
+})
+
+test('the wave a leader says its combo fell at', () => {
+  expect(fellAtOf('All done.\nMission: cleared')).toBeUndefined()
+  expect(fellAtOf('Tests failed.\n**Mission: fell at wave 3**')).toBe(3)
+  expect(fellAtOf(undefined)).toBeUndefined()
+})
+
+test('a Rally sets aside the runs of its wave and those after it; the leader is woken, or retired for a new one', () => {
+  const done = (r: SquadRun): SquadRun => ({ ...r, status: 'completed', endedAt: 50 })
+  let ms: Mission[] = [newMission(1, RUN_TEST, 0)]
+  ms = attachRun(ms, run('L', '[Run-Test #1] lead the Party Combo'))!
+  ms = attachRun(ms, run('a', '[Run-Test #1 1.1] build'))!
+  ms = attachRun(ms, run('b', '[Run-Test #1 3.1] test'))!
+  ms = attachRun(ms, run('h', 'helper'), 'b')!
+  ms = attachRun(ms, run('c', '[Run-Test #1 3.2] check'))!
+  ms = ms.map(m => mapAll(m, done))
+  ms = endLed(ms, 'L', 'done', 60)!
+  expect(ms[0]!.endedAt).toBe(60)
+  // Wave 3 again: its steps free, wave 1 standing, the mission still ended.
+  const r = rallyWaves(ms, 1, 3, 70)!
+  const m = r[0]!
+  expect(m.endedAt).toBe(60)
+  expect(m.waves[0]!.steps[0]!.run?.id).toBe('a')
+  expect(m.waves[1]!.steps.map(s => s.run)).toEqual([undefined, undefined])
+  expect(m.rallies).toEqual([{ from: 3, at: 70, runs: [expect.objectContaining({ id: 'b' }), expect.objectContaining({ id: 'h' }), expect.objectContaining({ id: 'c' })] }])
+  expect(rallyWaves(r, 2, 3, 70)).toBeUndefined()
+  // Woken, its leader runs again, and the steps sent again take their places.
+  let woken = reviveRun(r, 'L')!
+  expect(woken[0]!.endedAt).toBeUndefined()
+  expect(woken[0]!.leader?.status).toBe('running')
+  woken = attachRun(woken, run('b2', '[Run-Test #1 3.1] test'))!
+  expect(woken[0]!.waves[1]!.steps[0]!.run?.id).toBe('b2')
+  expect(woken[0]!.waves[1]!.steps[0]!.helpers).toBeUndefined()
+  // Not woken: set aside with the Rally, and the new leader begins the mission.
+  let fresh = retireLeader(r, 1)!
+  expect(fresh[0]!.leader).toBeUndefined()
+  expect(fresh[0]!.begunAt).toBeUndefined()
+  expect(fresh[0]!.rallies![0]!.leader?.id).toBe('L')
+  fresh = attachRun(fresh, { ...run('L2', '[Run-Test #1] lead the Party Combo'), startedAt: 80 })!
+  expect(fresh[0]!.leader?.id).toBe('L2')
+  expect(fresh[0]!.endedAt).toBeUndefined()
+  expect(fresh[0]!.begunAt).toBe(80)
+  // Everything spent stays counted: the coin and the cost.
+  expect(spentRuns(fresh[0]!).map(x => x.id).sort()).toEqual(['L', 'L2', 'a', 'b', 'c', 'h'])
+})
+
+test('missionCost: a Rally\'s set-aside runs count, its old leader with the leader', () => {
+  const u = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreation: 0, requests: 1 })
+  const m: Mission = {
+    ...newMission(1, RUN_TEST, 0),
+    leader: { ...run('L2', '[Run-Test #1] lead'), usage: u(1) },
+    rallies: [{ from: 3, at: 5, leader: { ...run('L', '[Run-Test #1] lead'), usage: u(10) }, runs: [{ ...run('b', '[Run-Test #1 3.1] test'), usage: u(100), turnTokens: 100 }] }],
+  }
+  const c = missionCost(m)
+  expect(c.leader.input).toBe(11)
+  expect(c.steps.input).toBe(100)
+  expect(c.perStep.map(p => p.id)).toEqual(['b'])
+  expect(tokensOf([m])).toBe(100)
+})
+
+test('a mission\'s record: its runs by wave and step with their reports, and its leader\'s log', () => {
+  let ms: Mission[] = [newMission(4, RUN_TEST, 0, 'the input')]
+  ms = attachRun(ms, run('L', '[Run-Test #4] lead the Party Combo'))!
+  ms = attachRun(ms, { ...run('a', '[Run-Test #4 1.1] build'), result: 'built' })!
+  ms = updateRun(ms, 'L', r => ({ ...r, result: 'Wave 3 failed.\nMission: fell at wave 3' }))!
+  const t = missionTrace(ms[0]!, (w, s) => `/r/w${w + 1}-s${s + 1}.md`)
+  expect(t.mission).toBe(4)
+  expect(t.input).toBe('the input')
+  expect(t.fellAt).toBe(3)
+  expect(t.leader?.id).toBe('L')
+  expect(t.waves.map(w => w.n)).toEqual([1, 3])
+  expect(t.waves[0]!.steps[0]).toMatchObject({ skill: 'demo-build', report: '/r/w1-s1.md', run: { id: 'a' } })
+  expect(JSON.stringify(t)).not.toContain('built')
+  const log = leaderLog(ms[0]!, [
+    { role: 'user', text: 'Run the Party Combo "Run-Test"', toolUses: [] },
+    { role: 'assistant', text: 'Sending wave 1.', toolUses: [{ tool: 'Agent', input: { description: '[Run-Test #4 1.1] build', model: 'haiku', subagent_type: 'general-purpose', prompt: 'long' } }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ text: 'x'.repeat(700) }] },
+    { role: 'assistant', text: 'The condition failed: stopping.', toolUses: [] },
+  ])
+  expect(log).toContain('# Mission #4 · Run-Test')
+  expect(log).toContain('## Leader\n\nSending wave 1.')
+  expect(log).toContain('- Agent: [Run-Test #4 1.1] build · haiku · general-purpose')
+  expect(log).toContain('The condition failed: stopping.')
+  expect(log).toContain(`${'x'.repeat(600)} …`)
+  expect(log).not.toContain('x'.repeat(601))
+})
+
+const mapAll = (m: Mission, fn: (r: SquadRun) => SquadRun): Mission => ({
+  ...m,
+  waves: m.waves.map(w => ({ ...w, steps: w.steps.map(s => ({ ...s, ...(s.run ? { run: fn(s.run) } : {}), ...(s.helpers ? { helpers: s.helpers.map(fn) } : {}) })) })),
+  others: m.others.map(fn),
+  ...(m.leader ? { leader: fn(m.leader) } : {}),
+})
+
+test('the condition a leader says held last in each wave; none held leaves the wave out', () => {
+  expect(heldOf(['Wave 1 failed.\nCondition: wave 1 #2\nGoing back.', '**Condition: wave 2 #1**', 'Condition: wave 1 #3', 'Condition: wave 3 #2', 'Condition: wave 3 #0'])).toEqual(['1#3', '2#1'])
+  const ms = [newMission(1, RUN_TEST, 0)]
+  const held = setHeld(ms, 1, ['1#2'])!
+  expect(held[0]!.held).toEqual(['1#2'])
+  expect(setHeld(held, 1, ['1#2'])).toBeUndefined()
+  expect(missionTrace(held[0]!).held).toEqual(['1#2'])
 })

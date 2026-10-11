@@ -10,9 +10,9 @@ import { addUsage, cacheEndText, cacheHitRate, cacheTtlOf, clockText, compact, N
 import type { CacheTtl, Tally } from './props'
 import { arranged as inOrder, grouped, namesFrom, orderMapFrom, parseAdd, skillsFrom, swapNames } from './skills'
 import type { Skill } from './skills'
-import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, reportPath, reportsDir, newComboName, removeLayer, removeStep, renameOk, setCondition } from './combos'
+import { addLayer, addStep, agentLabel, ASK_TOOL, ASK_TOOL_NAME, COMBO_CATEGORY, COMBO_MODELS, comboPrompt, comboSummary, rallyDir, rallyMessage, combosFrom, cycleAgent, cycleModel, DEFAULT_AGENTS, forSteps, LEADER_MODEL, leaderTag, moveLayer, reportPath, roundsPath, reportsDir, newComboName, removeLayer, removeStep, renameOk, setCondition, addCondition, removeCondition, conditionsOf } from './combos'
 import type { Combo } from './combos'
-import { agentsToFollow, anyLive, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, addRunUsage, missionCost, runTokens, statusOfAgent, tagOf, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
+import { agentsToFollow, anyLive, fellAtOf, heldOf, setHeld, leaderLog, missionTrace, rallyWaves, retireLeader, askingRun, attachRun, clearedOf, missionCombo, leaderOf, mapRuns, missionState, stepRuns, stepStatus, beginMission, combosOf, dateTimeText, elapsed, endLed, endMissions, reviveRun, settleLed, watching, newMission, nextMissionId, resultLines, runsOf, addRunUsage, missionCost, runTokens, statusOfAgent, tagOf, tokensOf, tokensText, coinText, updateRun, usageTokens } from './squad'
 import type { Mission, MissionState, RunStatus, SquadRun } from './squad'
 import { DUNGEON_ROWS, dungeonFrame } from './dungeon'
 import { agoText, cleanSummary, recentFrom, titleFrom, wrapSummary } from './summary'
@@ -98,6 +98,8 @@ const RUN_LOOK: Record<RunStatus | 'waiting' | 'skipped', { mark: string; word: 
   stopped: { mark: '■', word: 'stopped', color: '#ff8c42' },
   skipped: { mark: '–', word: 'not run' },
 }
+// Rally's flag.
+const RALLY_COLOR = '#ff9f1c'
 // The coin before a mission's tokens: gold, turning while the mission runs.
 const COIN = { color: '#ffd23f', frames: ['●', '◐', '○', '◑'], ms: 250 }
 
@@ -142,15 +144,15 @@ const catOrderAtom = atom({ plugin: 'slime-dashboard', key: 'catOrder' } as cons
 // The Party Combo section: the combos as saved (kept in the store across
 // sessions), whether it is open, the combo being edited (its tab: the name it
 // was saved under, or a new one's), its box folded to its name, the wave
-// whose + skill lists the skills to add (-1: none), the wave whose condition
-// field is open (-1: none), the rename field, and the subagent types the
+// whose + skill lists the skills to add (-1: none), the condition whose field
+// is open (its wave and place; none: empty), the rename field, and the subagent types the
 // session offers.
 const combosAtom = atom({ plugin: 'slime-dashboard', key: 'combos' } as const, [] as Combo[])
 const treeOpenAtom = atom({ plugin: 'slime-dashboard', key: 'treeOpen' } as const, false)
 const comboSelAtom = atom({ plugin: 'slime-dashboard', key: 'comboSel' } as const, '')
 const comboFoldAtom = atom({ plugin: 'slime-dashboard', key: 'comboFold' } as const, false)
 const comboPickAtom = atom({ plugin: 'slime-dashboard', key: 'comboPick' } as const, -1)
-const comboCondAtom = atom({ plugin: 'slime-dashboard', key: 'comboCond' } as const, -1)
+const comboCondAtom = atom({ plugin: 'slime-dashboard', key: 'comboCondAt' } as const, [] as number[])
 const comboRenameAtom = atom({ plugin: 'slime-dashboard', key: 'comboRename' } as const, false)
 const comboNameAtom = atom({ plugin: 'slime-dashboard', key: 'comboName' } as const, '')
 // Edits wait in a draft per tab until [Save] keeps them, so trying something
@@ -327,7 +329,16 @@ async function keepReport($: EngineInterface, id: string, answer: string) {
   if (!m.waves.find(w => w.n === tag.wave)?.steps[tag.step - 1]) return
   const home = await $.env.get('HOME')
   if (!home) return
-  await $.fs.write(reportPath(reportsDir(home, m.id), tag.wave - 1, tag.step - 1), answer.trimEnd() + '\n')
+  const dir = reportsDir(home, m.id)
+  await $.fs.write(reportPath(dir, tag.wave - 1, tag.step - 1), answer.trimEnd() + '\n')
+  // Every round's, one after another: the step's first report is round 1.
+  const rounds = roundsPath(dir, tag.wave - 1, tag.step - 1)
+  const before = await $.fs.read(rounds).catch(() => '')
+  const kept = typeof before === 'string' ? before.trimEnd() : ''
+  const n = (kept.match(/^## Round \d+/gm)?.length ?? 0) + 1
+  const at = dateTimeText(await $.clock.now(), tzOffset ?? 0)
+  await $.fs.write(rounds, `${kept ? `${kept}\n\n` : ''}## Round ${n} · ${at}\n\n${answer.trimEnd()}\n`)
+  await editRun($, id, r => ({ ...r, rounds: n }))
 }
 
 // Each ended mission's cost, a file of its own under ~/.claude/slime-dashboard/costs,
@@ -344,7 +355,24 @@ async function writeCosts($: EngineInterface) {
     if (!home) return
     const record = { mission: m.id, combo: m.combo, outcome: m.outcome, sentAt: m.sentAt, endedAt: m.endedAt, leaderModel: m.leader?.model, ...cost }
     await $.fs.write(`${home}/.claude/slime-dashboard/costs/${m.id}.json`, JSON.stringify(record, null, 2) + '\n')
+    await writeRecord($, m, reportsDir(home, m.id)).catch(() => {})
   }
+}
+
+// An ended mission's record beside its reports: trace.json, every run of it
+// by wave and step, and leader.md, its leader's log (combos.ts' Rally sends a
+// new leader to it). Written again whenever the mission ends anew.
+async function writeRecord($: EngineInterface, m: Mission, dir: string) {
+  const trace = missionTrace(m, (wave, step) => reportPath(dir, wave, step))
+  await $.fs.write(`${dir}/trace.json`, JSON.stringify(trace, null, 2) + '\n')
+  if (m.leader) await writeLeaderLog($, m, m.leader.id, `${dir}/leader.md`)
+}
+
+// The leader `id`'s log, as its conversation stands, at `path`; nothing when
+// the session cannot read that conversation.
+async function writeLeaderLog($: EngineInterface, m: Mission, id: string, path: string) {
+  const messages = await $.session.messages({ agentId: id })
+  if (Array.isArray(messages)) await $.fs.write(path, leaderLog(m, messages))
 }
 
 // Dungeon's tab counts the missions not yet ended: `Dungeon (2)`; and
@@ -380,6 +408,15 @@ async function checkSquad($: EngineInterface) {
   // The subagents a leader (or a step) spawns run under this plugin's own
   // spawn, whose agent.spawn hooks skip this one: the agent list names them.
   for (const a of agentsToFollow(missions, agents, LEADER_MODEL)) await started($, a.id, a.model, a.description, a.parentId)
+  // A step's subagent woken again (its leader sent it back to its skill, a
+  // condition taking the combo back to its wave) runs once more.
+  for (const m of missions.filter(x => x.endedAt === undefined)) {
+    for (const r of runsOf([m])) {
+      if (r.status === 'running' || r.id === m.leader?.id) continue
+      const a = agents.find(x => x.id === r.id)
+      if (a && !statusOfAgent(a.status) && (a.status === 'running' || a.status === 'waiting')) await setSquad($, ms => reviveRun(ms, r.id))
+    }
+  }
   // A run awaiting its background work has ended its turn: the list says so,
   // but it goes on until that work is done (or its mission ends).
   for (const r of running) {
@@ -396,6 +433,17 @@ async function checkSquad($: EngineInterface) {
   }
   // A mission whose leader ended before what it waited on did ends now.
   await setSquad($, missions => settleLed(missions, at))
+  // The conditions each leader has said held so far, from its log, for Dungeon.
+  for (const m of await read($, squadAtom)) {
+    if (!m.leader || (m.endedAt !== undefined && at - m.endedAt > LEADER_WAKE_MS)) continue
+    const messages = await $.session.messages({ agentId: m.leader.id }).catch(() => undefined)
+    if (!Array.isArray(messages)) continue
+    // Its last word may come only in its final report (handed back, not
+    // written as text): read last, once the mission has ended.
+    const said = messages.filter(x => x.role === 'assistant').map(x => x.text)
+    const held = heldOf(m.endedAt !== undefined && m.leader.result ? [...said, m.leader.result] : said)
+    await setSquad($, missions => setHeld(missions, m.id, held))
+  }
 }
 
 // How long a run may go unlisted by the engine before Dungeon takes it as ended.
@@ -1211,7 +1259,7 @@ async function newCombo($: EngineInterface) {
 async function selectCombo($: EngineInterface, tab: string) {
   await update($, comboSelAtom, () => tab)
   await update($, comboPickAtom, () => -1)
-  await update($, comboCondAtom, () => -1)
+  await update($, comboCondAtom, () => [])
   await update($, comboRenameAtom, () => false)
   await update($, comboDeleteAtom, () => false)
 }
@@ -1236,7 +1284,16 @@ async function saveCombo($: EngineInterface, tab: string) {
   const edited = (await read($, comboEditsAtom))[tab]
   if (!edited) return
   // A wave left with no skill has nothing to run: it goes, its condition too.
-  const draft = { ...edited, layers: edited.layers.filter(l => l.steps.length > 0) }
+  // Blank conditions go too.
+  const draft = {
+    ...edited,
+    layers: edited.layers
+      .filter(l => l.steps.length > 0)
+      .map(({ conditions: _, ...l }) => {
+        const said = conditionsOf({ conditions: _ })
+        return said.length ? { ...l, conditions: said } : l
+      }),
+  }
   const fresh = (await read($, comboFreshAtom)).includes(tab)
   await setCombos($, list => (fresh ? [...list, draft] : list.map(c => (c.name === tab ? draft : c))))
   await update($, comboFreshAtom, f => f.filter(t => t !== tab))
@@ -1293,16 +1350,7 @@ async function runCombo($: EngineInterface, combo: Combo, again?: { input: strin
     // begins it.
     const at = await $.clock.now()
     await setSquad($, missions => [...missions, newMission(id, combo, at, input)])
-    // This plugin's own spawn runs every agent.spawn hook but its own: the
-    // leader is put on its mission here.
-    const description = `${leaderTag(combo.name, id)} the Party Combo`
-    const led = await $.agent.spawn({ prompt: text, description, subagentType: 'general-purpose', model: LEADER_MODEL }).catch((err): AgentSpawnResult => ({ deny: String(err) }))
-    if (led.deny === undefined) {
-      // Its id, else as the agent list names it.
-      const leader = led.agentId ?? (await $.agent.list().catch(() => [])).find(a => a.description === description)?.id
-      if (leader !== undefined) await started($, leader, led.model, description)
-      else await setSquad($, missions => beginMission(missions, combo.name, at, id))
-    } else await $.prompt.submit({ text: comboPrompt(combo, input, id, false, reports)! })
+    if (!(await spawnLeader($, combo.name, id, text))) await $.prompt.submit({ text: comboPrompt(combo, input, id, false, reports)! })
     if (!again) await clearSkillInput($)
     await logEvent($, `Combo sent${again ? ' again' : ''}: ${combo.name}`)
     await openSquad($).catch(() => undefined)
@@ -1311,6 +1359,59 @@ async function runCombo($: EngineInterface, combo: Combo, again?: { input: strin
     $.ui.toast(`Party Combo: ${combo.name} did not run: ${why}`)
     await logEvent($, `Combo did not run: ${combo.name}`)
   }
+}
+
+// A leader subagent sent to lead mission `id` of `combo` with `text`; false
+// when none could be started. This plugin's own spawn runs every agent.spawn
+// hook but its own: the leader is put on its mission here.
+async function spawnLeader($: EngineInterface, combo: string, id: number, text: string): Promise<boolean> {
+  const description = `${leaderTag(combo, id)} the Party Combo`
+  const led = await $.agent.spawn({ prompt: text, description, subagentType: 'general-purpose', model: LEADER_MODEL }).catch((err): AgentSpawnResult => ({ deny: String(err) }))
+  if (led.deny !== undefined) return false
+  // Its id, else as the agent list names it.
+  const leader = led.agentId ?? (await $.agent.list().catch(() => [])).find(a => a.description === description)?.id
+  if (leader !== undefined) await started($, leader, led.model, description)
+  else {
+    const at = await $.clock.now()
+    await setSquad($, missions => beginMission(missions, combo, at, id))
+  }
+  return true
+}
+
+// Dungeon's ⚑ Rally on a wave of an ended mission: that wave and every one
+// after it run again, the waves before standing as they ended. What the run
+// before left is kept in a folder of the Rally's own (combos.ts' rallyDir):
+// the old reports of the waves run again, and its leader's log. The leader is
+// woken to run them, with all it did before, its failures too; one that cannot
+// be woken gives way to a new leader, sent the log to read first.
+async function rallyMission($: EngineInterface, missionId: number, from: number) {
+  const m = (await read($, squadAtom)).find(x => x.id === missionId)
+  const home = await $.env.get('HOME').catch(() => undefined)
+  if (!m || m.endedAt === undefined || !home) return
+  const dir = reportsDir(home, m.id)
+  const before = rallyDir(dir, (m.rallies?.length ?? 0) + 1)
+  for (const w of m.waves.filter(x => x.n >= from)) {
+    for (let i = 0; i < w.steps.length; i++) {
+      const old = await $.fs.read(reportPath(dir, w.n - 1, i)).catch(() => undefined)
+      if (typeof old === 'string') await $.fs.write(reportPath(before, w.n - 1, i), old).catch(() => {})
+    }
+  }
+  if (m.leader) await writeLeaderLog($, m, m.leader.id, `${before}/leader.md`).catch(() => {})
+  const at = await $.clock.now()
+  await setSquad($, missions => rallyWaves(missions, m.id, from, at))
+  const combo = missionCombo(m)
+  const leader = m.leader?.id
+  const woken = leader === undefined ? undefined : await $.session.send({ to: { agentId: leader }, text: rallyMessage(combo, m.id, from, before) }).catch(() => undefined)
+  if (leader !== undefined && woken?.isDelivered) {
+    await setSquad($, missions => reviveRun(missions, leader))
+    await logEvent($, `⚑ Rally: ${m.combo} #${m.id} from wave ${from}, its leader woken`)
+  } else {
+    await setSquad($, missions => retireLeader(missions, m.id))
+    const text = comboPrompt(combo, m.input ?? '', m.id, true, dir, { from, before })!
+    if (await spawnLeader($, m.combo, m.id, text)) await logEvent($, `⚑ Rally: ${m.combo} #${m.id} from wave ${from}, a new leader sent`)
+    else $.ui.toast(`Rally: no leader could be sent for ${m.combo} #${m.id}`)
+  }
+  await openSquad($).catch(() => undefined)
 }
 
 // Setting's Update: refresh this plugin's marketplace from GitHub, update the
@@ -2425,8 +2526,8 @@ export const register: Register = on => {
     // Party Combo: the combos, one edited at a time in a rounded box
     // under its name. Its waves, each in a box of its own, run in order, the
     // skills of a wave all at once, a row each; a wave moves, goes, takes
-    // another skill (+ skill lists the Skill Box's) and a condition (◆, between
-    // it and the next) the leader judges after it. Each skill's model and
+    // another skill (+ skill lists the Skill Box's) and conditions (◆, between
+    // it and the next) the leader judges after it, in order. Each skill's model and
     // subagent type change a press at a time. Edits stay in a draft until [Save].
     const treeOpen = await read($, treeOpenAtom)
     const edits = await read($, comboEditsAtom)
@@ -2495,7 +2596,6 @@ export const register: Register = on => {
             // One wave lays its steps out alike, all a row each or all two.
             const longestSkill = Math.max(0, ...layer.steps.map(st => st.skill.length + 1))
             const left = skillNames.filter(name => !layer.steps.some(st => st.skill === name))
-            const condLines = layer.condition ? wrapSummary(layer.condition, waveWidth - 4, 3) : []
             return (
               <Box key={`wave-${i}`} flexDirection="column">
                 <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1} width={waveWidth}>
@@ -2513,7 +2613,7 @@ export const register: Register = on => {
                       hover={{ scope: `wave-remove-${i}`, color: hex(STOP_RED), bold: true }}
                       onPress={async () => {
                         await update($, comboPickAtom, () => -1)
-                        await update($, comboCondAtom, () => -1)
+                        await update($, comboCondAtom, () => [])
                         await edit(c => removeLayer(c, i))
                       }}
                     />
@@ -2564,29 +2664,61 @@ export const register: Register = on => {
                     </Box>
                   )}
                 </Box>
-                {/* Between this wave and the next: the condition judged after it, then ↓. */}
+                {/* Between this wave and the next: the conditions judged after it,
+                    in order (the first that holds decides), then ↓. Pressed, one
+                    opens to be written; ✕ takes it off; + condition adds one. */}
                 <Box flexDirection="column" marginLeft={3}>
-                  {condAt === i && Input ? (
-                    <Input
-                      key={`cond-${i}`}
-                      label="◆"
-                      placeholder="e.g. if Fail, go on; if Pass, stop"
-                      submitLabel="done"
-                      value={layer.condition ?? ''}
-                      onInput={(value: string) => edit(c => setCondition(c, i, value))}
-                      onSubmit={async (value: string) => {
-                        await edit(c => setCondition(c, i, value))
-                        await update($, comboCondAtom, () => -1)
-                      }}
-                    />
-                  ) : (
-                    <Box flexDirection="column">
-                      <Button key={`wave-cond-${i}`} label={`◆ ${condLines[0] ?? '+ condition'}`} plain dimColor onPress={() => update($, comboCondAtom, p => (p === i ? -1 : i))} />
-                      {condLines.slice(1).map((line, k) => (
-                        <Text key={`cond-text-${i}-${k}`} dimColor>{`  ${line}`}</Text>
-                      ))}
-                    </Box>
+                  {(layer.conditions ?? []).map((cond, k) =>
+                    condAt[0] === i && condAt[1] === k && Input ? (
+                      <Input
+                        key={`cond-${i}-${k}`}
+                        label="◆"
+                        placeholder="e.g. if the test fails, go back to wave 1, at most 3 times"
+                        submitLabel="done"
+                        value={cond}
+                        onInput={(value: string) => edit(c => setCondition(c, i, k, value))}
+                        onSubmit={async (value: string) => {
+                          // Left empty, it goes.
+                          await edit(c => (value.trim() ? setCondition(c, i, k, value) : removeCondition(c, i, k)))
+                          await update($, comboCondAtom, () => [])
+                        }}
+                      />
+                    ) : (
+                      <Box key={`cond-row-${i}-${k}`} flexDirection="row" columnGap={1}>
+                        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                          {wrapSummary(cond.trim() || '…', waveWidth - 8, 3).map((line, n) =>
+                            n === 0 ? (
+                              <Button key={`wave-cond-${i}-${k}`} label={`◆ ${line}`} plain dimColor onPress={() => update($, comboCondAtom, p => (p[0] === i && p[1] === k ? [] : [i, k]))} />
+                            ) : (
+                              <Text key={`cond-text-${i}-${k}-${n}`} dimColor>{`  ${line}`}</Text>
+                            ),
+                          )}
+                        </Box>
+                        <Button
+                          key={`cond-remove-${i}-${k}`}
+                          label="✕"
+                          plain
+                          dimColor
+                          hover={{ scope: `cond-remove-${i}-${k}`, color: hex(STOP_RED), bold: true }}
+                          onPress={async () => {
+                            await update($, comboCondAtom, () => [])
+                            await edit(c => removeCondition(c, i, k))
+                          }}
+                        />
+                      </Box>
+                    ),
                   )}
+                  <Button
+                    key={`wave-cond-add-${i}`}
+                    label="◆ + condition"
+                    plain
+                    dimColor
+                    onPress={async () => {
+                      const at = (layer.conditions ?? []).length
+                      await edit(c => addCondition(c, i))
+                      await update($, comboCondAtom, () => [i, at])
+                    }}
+                  />
                   {i < combo.layers.length - 1 && <Text dimColor>↓</Text>}
                 </Box>
               </Box>
@@ -2861,11 +2993,13 @@ export const register: Register = on => {
       // A leader's tokens are its mission's coin's, not its card's.
       const spent = [run, ...helpers].reduce((n, r) => n + (r ? runTokens(r) : 0), 0)
       const tokens = run && !leads && spent ? tokensText(spent) : ''
+      // A step run again by a condition counts its rounds.
+      const rounds = run && (run.rounds ?? 0) > 1 ? `${run.rounds} rounds` : ''
       const doing = !run
         ? ''
         : status === 'running'
-          ? [run.status === 'running' && !run.awaiting ? `step ${run.steps}` : '', run.tool, elapsed(now - run.startedAt), tokens].filter(Boolean).join(' · ')
-          : [elapsed((leading ? now : (run.endedAt ?? now)) - run.startedAt), tokens].filter(Boolean).join(' · ')
+          ? [run.status === 'running' && !run.awaiting ? `step ${run.steps}` : '', run.tool, elapsed(now - run.startedAt), tokens, rounds].filter(Boolean).join(' · ')
+          : [elapsed((leading ? now : (run.endedAt ?? now)) - run.startedAt), tokens, rounds].filter(Boolean).join(' · ')
       const isOpen = leads || open.includes(key)
       // Running, the step (and what it sent out) can be called back.
       const live = [run, ...helpers].filter((r): r is SquadRun => r !== undefined && r.status === 'running').map(r => r.id)
@@ -2954,6 +3088,7 @@ export const register: Register = on => {
         .filter(Boolean)
         .join(' · ')
       const inner = outer - 4
+      const fell = ended ? fellAtOf(m.leader?.result) : undefined
       return (
         <Box key={`mission-${m.id}`} flexDirection="column" borderStyle="round" borderColor={COMBO.banner} paddingX={1} width={outer}>
           {/* The combo's name, how it stands and [x] at the right taking the
@@ -2980,7 +3115,7 @@ export const register: Register = on => {
             </Box>
           </Box>
           <Box flexDirection="row" justifyContent="space-between">
-            <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)}${folded ? ` · ${count('completed')}/${steps.length}` : ''}`}</Text>
+            <Text dimColor wrap="truncate-end">{`#${m.id} · ${dateTimeText(m.sentAt, tzOffset ?? 0)}${folded ? ` · ${count('completed')}/${steps.length}` : ''}${fell !== undefined ? ` · fell at wave ${fell}` : ''}`}</Text>
             {/* What the whole combo has spent: a gold coin, spinning while it runs. */}
             <Text>
               <Text color={COIN.color} bold>{`${!ended && m.begunAt !== undefined ? COIN.frames[Math.floor(now / COIN.ms) % COIN.frames.length] : COIN.frames[0]} `}</Text>
@@ -3003,14 +3138,33 @@ export const register: Register = on => {
               {m.waves.map((w, wi) => (
                 <Box key={`mission-${m.id}-w${w.n}`} flexDirection="column">
                   {wi > 0 && <Text dimColor>{'  ↓'}</Text>}
-                  <Text bold>
-                    {`Wave ${w.n}`}
-                    {w.steps.length > 1 && <Text dimColor>{' · all at once'}</Text>}
-                  </Text>
+                  {/* The wave, and where the leader said the combo fell; an
+                      ended mission's [⚑ Rally] sends it again from this wave. */}
+                  <Box flexDirection="row" justifyContent="space-between">
+                    <Text bold wrap="truncate-end">
+                      {`Wave ${w.n}`}
+                      {w.steps.length > 1 && <Text dimColor>{' · all at once'}</Text>}
+                      {fell === w.n && <Text color={RUN_LOOK.failed.color}>{' · fell here'}</Text>}
+                    </Text>
+                    {ended && (
+                      <Box flexDirection="row" flexShrink={0}>
+                        <Text dimColor>[</Text>
+                        <Button key={`mission-${m.id}-rally-${w.n}`} label="⚑ Rally" plain hover={{ scope: `mission-${m.id}-rally-${w.n}`, color: RALLY_COLOR, bold: true }} onPress={() => rallyMission($, m.id, w.n)} />
+                        <Text dimColor>]</Text>
+                      </Box>
+                    )}
+                  </Box>
                   {w.steps.map((st, si) =>
                     runBlock(`mission-${m.id}-${w.n}-${si}`, `/${st.skill}`, modelName(st.model), agentLabel(st.agent), st.run, ended, inner - 2, { helpers: st.helpers ?? [] }),
                   )}
-                  {w.condition && <Text dimColor wrap="wrap">{`◆ ${w.condition}`}</Text>}
+                  {/* The condition its leader said held last in this wave: green and bold. */}
+                  {(w.conditions ?? []).map((cond, k) =>
+                    (m.held ?? []).includes(`${w.n}#${k + 1}`) ? (
+                      <Text key={`mission-${m.id}-w${w.n}-c${k}`} color={RUN_LOOK.completed.color} bold wrap="wrap">{`◆ ${cond}`}</Text>
+                    ) : (
+                      <Text key={`mission-${m.id}-w${w.n}-c${k}`} dimColor wrap="wrap">{`◆ ${cond}`}</Text>
+                    ),
+                  )}
                 </Box>
               ))}
               {m.others.length > 0 && (

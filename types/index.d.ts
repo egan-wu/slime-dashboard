@@ -3,9 +3,9 @@ import type { Mission } from '../hooks/squad'
 export type SlimeModel = string
 // A Skill Box skill (hooks/skills.ts): its command, category and dim description.
 // A Party Combo (hooks/combos.ts): layers of skills, each step's model and
-// subagent type, and a condition the leader judges after a layer.
+// subagent type, and the conditions the leader judges after a layer, in order.
 export type SlimeComboStep = { skill: string; model: 'haiku' | 'sonnet' | 'opus' | 'fable'; agent: string }
-export type SlimeCombo = { name: string; layers: { steps: SlimeComboStep[]; condition?: string }[] }
+export type SlimeCombo = { name: string; layers: { steps: SlimeComboStep[]; conditions?: string[] }[] }
 export type SlimeSkill = { name: string; category: string; description?: string; command?: string }
 // One line of the Event Message block (hooks/events.ts): when, and what happened.
 export type SlimeEventEntry = { at: number; text: string }
@@ -64,7 +64,7 @@ declare module 'claude-code' {
       treeOpen: boolean
       comboSel: string
       comboPick: number
-      comboCond: number
+      comboCondAt: number[]
       comboFold: boolean
       comboRename: boolean
       comboName: string
